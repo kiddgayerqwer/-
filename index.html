@@ -1,0 +1,2063 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- PWA：可加到主畫面的全螢幕網頁 APP -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="上4下4">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>上4下4 智慧監控系統</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+        :root { color-scheme: dark; }
+        html { height: 100%; }
+        :root {
+            --accent: #a855f7;
+            --accent-hover: #9333ea;
+            --bg-dark: #050505;
+            --panel-bg: rgba(10, 15, 25, 0.85);
+        }
+
+        body {
+            background-color: #000;
+            color: #f8fafc;
+            overflow: hidden;
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            user-select: none;
+        }
+        
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        @media (max-width: 1200px) {
+            .video-grid {
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                overflow-y: auto;
+            }
+        }
+
+        .video-container {
+            position: relative;
+            background: var(--bg-dark);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            /* 效能優化：精準指定過渡屬性，杜絕 transition: all 在影片縮放時引發的連續佈局重算 */
+            transition: outline 0.2s ease, box-shadow 0.2s ease;
+            height: 100%;
+            /* 核心優化：限制瀏覽器重繪與排版範圍，徹底隔離各頻道的渲染樹，杜絕多路重繪 LAG */
+            contain: layout paint;
+        }
+
+        .video-container:last-child { border-right: none; }
+
+        .video-container:hover {
+            outline: 2px solid rgba(168, 85, 247, 0.4);
+            outline-offset: -2px;
+            z-index: 10;
+        }
+
+        /* 被點選聚焦時的強烈紫色發光外框 */
+        .video-container.active {
+            outline: 2px solid var(--accent) !important;
+            outline-offset: -2px;
+            z-index: 15;
+            box-shadow: inset 0 0 20px rgba(168, 85, 247, 0.4);
+        }
+
+        .video-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+            /* 手指縮放／拖曳交給程式處理，不讓瀏覽器把整頁放大 */
+            touch-action: none;
+            /* 核心優化：隔離內部影片任意縮放平移時造成的網頁排版引擎波動 */
+            contain: layout paint;
+        }
+
+        video, img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            pointer-events: none;
+            display: none;
+            will-change: transform;
+            /* 啟用 3D 渲染加速，強制 GPU 獨立分層，避免多視窗重繪引發一格一格的卡頓 */
+            transform: translate3d(0, 0, 0);
+            backface-visibility: hidden;
+            perspective: 1000px;
+        }
+
+        /* 自定義可拖拽調整尺寸的邊界調控桿 */
+        .resizer-v {
+            position: absolute;
+            right: -3px;
+            top: 0;
+            bottom: 0;
+            width: 6px;
+            cursor: col-resize;
+            z-index: 50;
+            background: transparent;
+            transition: background-color 0.2s ease;
+        }
+        .resizer-v:hover, .resizer-v.dragging {
+            background-color: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .resizer-h {
+            position: absolute;
+            bottom: -3px;
+            left: 0;
+            right: 0;
+            height: 6px;
+            cursor: row-resize;
+            z-index: 50;
+            background: transparent;
+            transition: background-color 0.2s ease;
+        }
+        .resizer-h:hover, .resizer-h.dragging {
+            background-color: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+        }
+
+        .drop-zone {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(7, 7, 10, 0.9);
+            z-index: 40;
+            cursor: pointer;
+            text-align: center;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            padding: 10px;
+        }
+
+        .drop-zone.hidden { opacity: 0; pointer-events: none; transform: scale(1.1); }
+
+        .controls-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,0.95) 80%);
+            padding: 40px 15px 15px 15px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 45;
+        }
+
+        .video-container:hover .controls-overlay { opacity: 1; transform: translateY(0); }
+
+        /* 閒置時自動隱藏所有控制 UI */
+        body.user-idle .controls-overlay,
+        body.user-idle .master-controls,
+        body.user-idle #closeFsBtn,
+        body.user-idle #closeFsKeepBtn { opacity: 0 !important; pointer-events: none !important; }
+
+        /* 閒置時隱藏滑鼠游標 */
+        body.user-idle, body.user-idle * {
+            cursor: none !important;
+        }
+
+        /* 檔名文字允許滑鼠選取與複製 */
+        [id^="filename-"] {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            cursor: text !important;
+            pointer-events: auto;
+        }
+
+        .custom-range {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .custom-range::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: var(--accent);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        /* 主功能欄：固定在螢幕上方並向下移動 3 公分，並調整陰影朝向下方 */
+        .layout-tab {
+            color: rgba(255,255,255,0.55);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 6px;
+            transition: background 0.2s, color 0.2s;
+            white-space: nowrap;
+        }
+        .layout-tab:hover { color: #fff; background: rgba(255,255,255,0.08); }
+        .layout-tab.active { color: #fff; background: rgba(168, 85, 247, 0.55); }
+
+        /* 模擬全螢幕：去掉外殼的上下安全區留白，讓畫面佔滿；退出按鈕自己避開手機的安全區 */
+        :root.pseudo-fs { padding: 0 !important; }
+        #closeFsBtn, #closeFsKeepBtn {
+            margin-bottom: env(safe-area-inset-bottom, 0px);
+            margin-right: env(safe-area-inset-right, 0px);
+        }
+
+        .master-controls {
+            position: fixed;
+            top: 50%;
+            bottom: auto;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            padding: 10px 30px;
+            border-radius: 28px;
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.6);
+            transition: opacity 0.5s ease, transform 0.3s ease;
+            white-space: nowrap;
+        }
+
+        /* 全螢幕狀態下強行滑動隱藏頂部主控台，防止遮擋任何監控畫面 */
+        body.fullscreen-active .master-controls {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transform: translate(-50%, calc(-50% - 40px)) !important;
+            transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+        
+        .btn {
+            padding: 8px 18px;
+            border-radius: 10px;
+            background: var(--accent);
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: none;
+        }
+
+        .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+        .btn-outline { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .btn-outline.active { background: rgba(168, 85, 247, 0.45); border-color: rgba(168, 85, 247, 0.8); }
+        .btn-danger { background: #ef4444; }
+
+        #messageBox { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translate(-50%, -45%); }
+            to { opacity: 1; transform: translate(-50%, -50%); }
+        }
+    </style>
+</head>
+<body>
+<!-- 提示彈窗（預設隱藏，僅在有系統通知或錯誤時顯示） -->
+    <div id="messageBox" style="display: none;" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900/98 backdrop-blur-2xl p-10 rounded-3xl border border-white/10 z-[200] text-center shadow-[0_0_100px_rgba(0,0,0,0.8)] max-w-sm">
+        <div class="mb-6 text-purple-400 flex justify-center">
+            <svg class="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+        </div>
+        <p id="messageText" class="mb-8 text-lg font-medium text-gray-200 leading-relaxed">歡迎使用智慧監控系統！<br>請在各個頻道拖放多媒體檔案、ZIP 專案包，或直接點擊上傳開始監控。</p>
+        <button class="btn w-full py-4 justify-center text-base" onclick="closeMessage()">確 認</button>
+    </div>
+
+    <!-- 輕量提示（例如 K 鍵切換資料夾） -->
+    <div id="toast" class="fixed top-6 left-1/2 -translate-x-1/2 bg-black/75 text-white text-sm px-5 py-2 rounded-full border border-white/10 z-[210] pointer-events-none opacity-0 transition-opacity duration-300"></div>
+
+    <!-- 全螢幕關閉懸浮 X 按鈕 -->
+    <button id="closeFsBtn" class="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-black/60 hover:bg-red-600/80 text-white flex items-center justify-center border border-white/10 shadow-lg transition-all duration-300 z-[150] hidden" onclick="toggleFullscreen()" title="退出全螢幕並清除影片">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+    </button>
+
+    <!-- 全螢幕關閉並保留影片懸浮按鈕 -->
+    <button id="closeFsKeepBtn" class="fixed bottom-6 right-20 w-12 h-12 rounded-full bg-black/60 hover:bg-purple-600/80 text-white flex items-center justify-center border border-white/10 shadow-lg transition-all duration-300 z-[150] hidden" onclick="exitFullscreenKeep()" title="退出全螢幕（保留影片）(F1)">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h6v6m10-6h-6v6M4 10h6V4m10 6h-6V4"></path>
+        </svg>
+    </button>
+
+    <!-- 主控台 -->
+    <div class="master-controls" id="masterControls">
+        <div class="flex items-center border-r border-white/10 pr-6">
+            <div class="w-3 h-3 bg-purple-500 rounded-full animate-pulse mr-3"></div>
+            <span class="text-sm font-black text-white tracking-widest uppercase text-xs">上4下4</span>
+        </div>
+        
+        <div class="flex items-center gap-4 px-2">
+            <!-- 切換影片格子數量 -->
+            <div class="flex flex-col">
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁</span>
+                <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
+                    <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
+                    <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
+                    <button type="button" class="layout-tab" data-layout="3" onclick="switchLayoutTab('3')">3格</button>
+                </div>
+                <select id="gridCountSelect" class="hidden" aria-hidden="true" tabindex="-1">
+                    <option value="5" selected>5格</option>
+                    <option value="4">4格</option>
+                    <option value="3">3格</option>
+                </select>
+
+        <div class="flex gap-3 mt-3">
+            <!-- 隱藏的 Master File Input，可用快捷鍵 E 觸發 -->
+            <input type="file" id="masterFileInput" class="hidden" accept="video/*,image/*" multiple onchange="processPhotoFiles(this.files)">
+
+            <!-- 新增「打開」按鈕，點擊後即可開啟檔案選取器 -->
+            <button class="btn" onclick="document.getElementById('masterFileInput').click()" title="從相簿選擇影片與照片 (E)">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+                <span>打開相簿</span>
+            </button>
+
+            <!-- 全螢幕按鈕 -->
+            <button class="btn btn-outline" id="fsToggleBtn" onclick="toggleFullscreen()">全螢幕</button>
+        </div>
+            </div>
+
+            <!-- 全局縮放（已從功能列隱藏，快捷鍵仍可使用） -->
+            <div class="hidden">
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">全局大小</span>
+                <input type="range" id="globalZoom" class="custom-range w-20" min="1" max="5" step="0.01" value="1" oninput="handleGlobalZoom(this.value)">
+            </div>
+
+            <!-- 全局垂直位置（已從功能列隱藏，快捷鍵仍可使用） -->
+            <div class="hidden">
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1 text-center">垂直位置</span>
+                <div class="flex items-center gap-2">
+                    <button class="text-white/40 hover:text-purple-400" onclick="adjustGlobalY(-10)">
+                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"/>
+                        </svg>
+                    </button>
+                    <input type="range" id="globalY" class="custom-range w-20" min="-500" max="500" step="1" value="0" oninput="handleGlobalY(this.value)">
+                    <button class="text-white/40 hover:text-purple-400" onclick="adjustGlobalY(10)">
+                        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 全局播放速度（已從功能列隱藏，快捷鍵仍可使用） -->
+            <div class="hidden">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest">全局速度</span>
+                    <span id="speedVal" class="text-[9px] font-mono text-purple-400 font-bold ml-2">1.0x</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button class="text-white/40 hover:text-purple-400 text-[10px] font-bold font-mono px-1.5 py-0.5 bg-white/5 rounded hover:bg-white/10 transition-colors" onclick="adjustGlobalSpeed(-0.1)" title="減速 0.1x (O)">O</button>
+                    <input type="range" id="globalSpeed" class="custom-range w-20" min="0.1" max="4.0" step="0.1" value="1" oninput="handleGlobalSpeed(this.value)">
+                    <button class="text-white/40 hover:text-purple-400 text-[10px] font-bold font-mono px-1.5 py-0.5 bg-white/5 rounded hover:bg-white/10 transition-colors" onclick="adjustGlobalSpeed(0.1)" title="加速 0.1x (P)">P</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 監控柵格 -->
+    <div class="video-grid" id="videoGrid"></div>
+
+    <script>
+        const grid = document.getElementById('videoGrid');
+        const channels = [];
+        const channelCount = 8; // 最大後台頻道數
+        let visibleChannelCount = 8; // 當前畫面上顯示的頻道數
+        const imageDuration = 8000;
+        let currentGlobalSpeed = 1.0;
+        let keepMediaOnExit = false;
+        let activeChannelIdx = null;
+
+        // 調整邊界拖曳控制專用變數
+        let startX, startY;
+        let initialSizes = [];
+        let activeResizerIndex = -1;
+        let isResizingCol = false;
+        let isResizingRow = false;
+
+        // 動態生成 8 個監控頻道（始終預先建立好以保持資料狀態，僅透過 CSS 控制顯示/隱藏）
+        for (let i = 0; i < channelCount; i++) {
+            const container = document.createElement('div');
+            container.className = 'video-container';
+            container.id = `ch-container-${i}`;
+            container.innerHTML = `
+                <div class="drop-zone" id="drop-${i}" onclick="document.getElementById('input-${i}').click()">
+                    <div class="w-12 h-12 md:w-16 md:h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-5">
+                        <svg class="w-6 h-6 md:w-8 md:h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                    </div>
+                </div>
+                <input type="file" id="input-${i}" class="hidden" accept="video/*,image/*,.zip" multiple>
+                <div class="video-wrapper" id="wrap-${i}">
+                    <!-- 將預載加載設置為 metadata，防止瀏覽器背景過度下載高畫質影片造成 IO 與頻寬卡死 -->
+                    <video id="vid-${i}" playsinline muted preload="metadata"></video>
+                    <img id="img-${i}" alt="" style="display:none">
+                </div>
+                <div class="controls-overlay">
+                    <div id="seek-box-${i}" class="flex flex-col gap-1.5 mb-1">
+                        <div class="flex justify-between text-[9px] text-white/50 font-mono font-bold">
+                            <span id="cur-${i}">00:00</span>
+                            <span id="tot-${i}">00:00</span>
+                        </div>
+                        <input type="range" id="sk-${i}" class="custom-range" value="0" min="0" max="100" step="0.1">
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-[9px] text-purple-400 font-black uppercase tracking-widest w-8">速度</span>
+                        <input type="range" id="spd-${i}" class="custom-range" min="0.1" max="4.0" step="0.1" value="1">
+                        <span id="spd-val-${i}" class="text-[9px] font-mono text-white/40 w-6">1.0x</span>
+                    </div>
+                    <input type="hidden" id="zm-${i}" value="1">
+                    <div class="flex items-center gap-3">
+                        <span class="text-[9px] text-purple-400 font-black uppercase tracking-widest w-8">旋轉</span>
+                        <button id="rot-btn-${i}" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded px-2 py-0.5 text-[9px] font-mono flex items-center gap-1 transition-colors" onclick="cycleRotation(${i})" title="旋轉影片角度 (0° / 90° / 180° / 270°)">
+                            <svg class="w-2.5 h-2.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3m-3-3v12"></path>
+                            </svg>
+                            <span id="rot-val-${i}">0°</span>
+                        </button>
+                        
+                        <!-- 每個頻道獨立的聲音開關；預設為靜音 -->
+                        <button id="sound-btn-${i}" class="bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-md px-3 py-1.5 text-base font-bold flex items-center gap-2 transition-colors ml-auto" onclick="toggleChannelSound(${i})" title="開啟此頻道聲音">
+                            <svg id="sound-icon-${i}" class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5L6 9H3v6h3l5 4V5zm8.5 4.5l-5 5m0-5l5 5"></path>
+                            </svg>
+                            <span id="sound-label-${i}">靜音</span>
+                        </button>
+
+                    </div>
+                    <div class="flex justify-between items-center w-full pt-2 border-t border-white/5 mt-1">
+                        <span class="text-[10px] font-black text-white/20 tracking-widest">頻道_0${i+1}</span>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(container);
+
+            const state = {
+                id: i,
+                video: document.getElementById(`vid-${i}`),
+                img: document.getElementById(`img-${i}`),
+                seek: document.getElementById(`sk-${i}`),
+                zoomRange: document.getElementById(`zm-${i}`),
+                speedRange: document.getElementById(`spd-${i}`),
+                speedDisplay: document.getElementById(`spd-val-${i}`),
+                soundButton: document.getElementById(`sound-btn-${i}`),
+                soundLabel: document.getElementById(`sound-label-${i}`),
+                soundIcon: document.getElementById(`sound-icon-${i}`),
+                wrapper: document.getElementById(`wrap-${i}`),
+                dropZone: document.getElementById(`drop-${i}`),
+                seekBox: document.getElementById(`seek-box-${i}`),
+                media: [], cursor: 0, timer: null, 
+                // 渲染與控制解耦核心狀態
+                scale: 1, x: 0, y: 0, rotate: 0, 
+                targetScale: 1, targetX: 0, targetY: 0, targetRotate: 0,
+                dragging: false, lastX: 0, lastY: 0,
+                isSuspended: false, savedTime: 0, isPlayingBeforeSuspend: true, isHovered: false,
+                isMuted: true,
+                needsTransformUpdate: false
+            };
+            
+            // 效能優化：主動關閉網頁端不必要的額外畫中畫與遠端播放開銷，節省背景資源
+            state.video.disablePictureInPicture = true;
+            state.video.disableRemotePlayback = true;
+            // 關閉非必要的音效控制同步線程
+            state.video.muted = true;
+            state.video.volume = 1;
+            
+            channels.push(state);
+
+            const filenameElForCopy = document.getElementById(`filename-${i}`);
+            if (filenameElForCopy) {
+                filenameElForCopy.addEventListener('mousedown', (e) => e.stopPropagation());
+                filenameElForCopy.addEventListener('click', (e) => e.stopPropagation());
+            }
+
+            container.addEventListener('click', () => { setActiveChannel(i); });
+            
+            // 監聽滑鼠懸停狀態：只有在滑鼠懸浮在該頻道，或是當前被點擊活動頻道時才更新進度條與數值
+            container.addEventListener('mouseenter', () => { state.isHovered = true; });
+            container.addEventListener('mouseleave', () => { state.isHovered = false; });
+
+            document.getElementById(`input-${i}`).onchange = (e) => processFiles(e.target.files, i);
+            
+            // 手動拖曳進度條優化：拖曳時即時同步數值，即使影片暫停也絕不 LAG
+            state.seek.oninput = () => { 
+                if(state.video.duration) {
+                    const targetTime = (state.seek.value / 100) * state.video.duration;
+                    state.video.currentTime = targetTime;
+                    const curTxt = document.getElementById(`cur-${i}`);
+                    if (curTxt) curTxt.innerText = formatSec(targetTime);
+                }
+            };
+            
+            // 拖曳縮放：僅標記數值變動，交由 requestAnimationFrame 渲染
+            state.zoomRange.oninput = () => {
+                state.targetScale = parseFloat(state.zoomRange.value);
+                state.needsTransformUpdate = true;
+            };
+
+            state.speedRange.oninput = () => {
+                const val = parseFloat(state.speedRange.value);
+                state.speedDisplay.innerText = val.toFixed(1) + 'x';
+                if (state.video && !state.isSuspended) state.video.playbackRate = val;
+            };
+
+            // 滾輪縮放：僅標記視圖變動
+            state.wrapper.onwheel = (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                const newScale = Math.min(5, Math.max(1, parseFloat(state.zoomRange.value) + delta));
+                state.zoomRange.value = newScale;
+                state.targetScale = newScale;
+                state.needsTransformUpdate = true;
+            };
+
+            // 滑鼠拖曳平移：解耦滑鼠輸入與實際渲染，預算目標坐過值
+            state.wrapper.onmousedown = (e) => {
+                // 如果是按在調控桿（resizer）上，不觸發平移
+                if (e.target.classList.contains('resizer-v') || e.target.classList.contains('resizer-h')) return;
+                if (state.targetScale <= 1) return;
+                state.dragging = true;
+                state.lastX = e.clientX - state.targetX; 
+                state.lastY = e.clientY - state.targetY;
+                e.preventDefault();
+            };
+
+            // 行動裝置觸控：兩指捏合縮放（以手指中心為準），放大後一指拖曳平移
+            const MIN_SCALE = 1, MAX_SCALE = 5;
+            const tDist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+            const startPinch = (e) => {
+                const [a, b] = e.touches;
+                const r = state.wrapper.getBoundingClientRect();
+                state.pinching = true;
+                state.dragging = false;
+                state.pinch = {
+                    dist: tDist(a, b) || 1,
+                    scale: state.targetScale,
+                    tx: state.targetX, ty: state.targetY,
+                    cx: r.left + r.width / 2, cy: r.top + r.height / 2,
+                    mx: (a.clientX + b.clientX) / 2, my: (a.clientY + b.clientY) / 2
+                };
+            };
+            const startPan = (touch) => {
+                state.pinching = false;
+                if (state.targetScale <= 1) { state.dragging = false; return; }
+                state.dragging = true;
+                state.lastX = touch.clientX - state.targetX;
+                state.lastY = touch.clientY - state.targetY;
+            };
+
+            state.wrapper.addEventListener('touchstart', (e) => {
+                if (e.target.classList.contains('resizer-v') || e.target.classList.contains('resizer-h')) return;
+                if (e.touches.length >= 2) { e.preventDefault(); startPinch(e); }
+                else startPan(e.touches[0]);
+            }, { passive: false });
+
+            state.wrapper.addEventListener('touchmove', (e) => {
+                if (state.pinching && e.touches.length >= 2) {
+                    e.preventDefault();
+                    const [a, b] = e.touches;
+                    const P = state.pinch;
+                    const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, P.scale * tDist(a, b) / P.dist));
+                    const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
+                    // 讓手指下的畫面位置保持不動，並跟著兩指中心移動
+                    const k = s / P.scale;
+                    state.targetScale = s;
+                    state.targetX = (mx - P.cx) - k * (P.mx - P.cx - P.tx);
+                    state.targetY = (my - P.cy) - k * (P.my - P.cy - P.ty);
+                    state.zoomRange.value = s;
+                    state.needsTransformUpdate = true;
+                } else if (state.dragging && e.touches.length === 1) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    state.targetX = touch.clientX - state.lastX;
+                    state.targetY = touch.clientY - state.lastY;
+                    state.needsTransformUpdate = true;
+                }
+            }, { passive: false });
+
+            const endTouch = (e) => {
+                if (e.touches.length >= 2) { startPinch(e); return; }
+                if (e.touches.length === 1) { startPan(e.touches[0]); return; }
+                state.pinching = false;
+                state.dragging = false;
+                // 縮回原尺寸時，畫面自動回正
+                if (state.targetScale <= 1.02) {
+                    state.targetScale = 1; state.zoomRange.value = 1;
+                    state.targetX = 0; state.targetY = 0;
+                    state.needsTransformUpdate = true;
+                }
+            };
+            state.wrapper.addEventListener('touchend', endTouch);
+            state.wrapper.addEventListener('touchcancel', endTouch);
+
+            window.addEventListener('mousemove', (e) => {
+                if (!state.dragging) return;
+                state.targetX = e.clientX - state.lastX; 
+                state.targetY = e.clientY - state.lastY;
+                state.needsTransformUpdate = true;
+            });
+
+            window.addEventListener('mouseup', () => state.dragging = false);
+
+            state.video.onloadedmetadata = () => { document.getElementById(`tot-${i}`).innerText = formatSec(state.video.duration); };
+            state.video.onended = () => { if (state.media.length > 1) nextMedia(i); else state.video.play(); };
+
+            container.ondragover = (e) => { e.preventDefault(); container.style.background = "rgba(168, 85, 247, 0.05)"; };
+            container.ondragleave = () => { container.style.background = "var(--bg-dark)"; };
+            container.ondrop = (e) => {
+                container.style.background = "var(--bg-dark)";
+                // 實際匯入統一交給 window drop，避免同一次拖曳被處理兩次。
+            };
+        }
+
+        // 核心效能突破：使用單一全局的 requestAnimationFrame 迴圈代替多個事件監聽器
+        function updateProgressLoop() {
+            // 1. 進度條非同步更新節流
+            if (!document.body.classList.contains('user-idle')) {
+                channels.forEach((ch, i) => {
+                    if (i < visibleChannelCount && !ch.isSuspended && ch.media.length && ch.video && ch.video.style.display !== 'none') {
+                        if ((ch.isHovered || activeChannelIdx === i) && !ch.video.paused && ch.video.duration) {
+                            ch.seek.value = (ch.video.currentTime / ch.video.duration) * 100;
+                            const curTxt = document.getElementById(`cur-${i}`);
+                            if (curTxt) {
+                                curTxt.innerText = formatSec(ch.video.currentTime);
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // 2. 視窗平移、縮放、旋轉 3D 硬體加速幀鎖定同步 (Frame-Locked Transform Sync)
+            channels.forEach((ch) => {
+                if (ch.needsTransformUpdate) {
+                    ch.scale = ch.targetScale;
+                    ch.x = ch.targetX;
+                    ch.y = ch.targetY;
+                    ch.rotate = ch.targetRotate;
+                    
+                    if (ch.scale === 1 && ch.rotate === 0) {
+                        ch.x = 0; ch.y = 0;
+                        ch.targetX = 0; ch.targetY = 0;
+                    }
+                    
+                    // 使用 translate3d 實施硬體加速
+                    const css = `translate3d(${ch.x}px, ${ch.y}px, 0) scale(${ch.scale}) rotate(${ch.rotate}deg)`;
+                    ch.video.style.transform = css;
+                    ch.img.style.transform = css;
+                    ch.needsTransformUpdate = false;
+                }
+            });
+            
+            requestAnimationFrame(updateProgressLoop);
+        }
+        // 啟動全局幀同步渲染迴圈
+        requestAnimationFrame(updateProgressLoop);
+
+        // 建立並注入拖曳調整尺寸的調控桿
+        function setupResizers() {
+            // 清理舊的調控桿
+            document.querySelectorAll('.resizer-v, .resizer-h').forEach(el => el.remove());
+
+            let cols = visibleChannelCount;
+            let rows = 1;
+            const val = document.getElementById('gridCountSelect').value;
+            if (val === '2big2small') {
+                cols = 4;
+                rows = 1;
+            } else if (val === '2up2down') {
+                cols = 2;
+                rows = 2;
+            } else if (val === '3up3down') {
+                cols = 3;
+                rows = 2;
+            } else if (val === '4up4down') {
+                cols = 4;
+                rows = 2;
+            }
+
+            for (let idx = 0; idx < visibleChannelCount; idx++) {
+                const container = document.getElementById(`ch-container-${idx}`);
+                if (!container) continue;
+
+                const r = Math.floor(idx / cols);
+                const c = idx % cols;
+
+                // 垂直調控桿：在每一列右側（最後一欄除外）
+                if (c < cols - 1) {
+                    const resizerV = document.createElement('div');
+                    resizerV.className = 'resizer-v';
+                    resizerV.dataset.col = c;
+                    resizerV.addEventListener('mousedown', initDragCol);
+                    resizerV.addEventListener('touchstart', initDragCol, { passive: false });
+                    container.appendChild(resizerV);
+                }
+
+                // 水平調控桿：在每一行下側（最後一行除外）
+                if (r < rows - 1) {
+                    const resizerH = document.createElement('div');
+                    resizerH.className = 'resizer-h';
+                    resizerH.dataset.row = r;
+                    resizerH.addEventListener('mousedown', initDragRow);
+                    resizerH.addEventListener('touchstart', initDragRow, { passive: false });
+                    container.appendChild(resizerH);
+                }
+            }
+        }
+
+        // 初始化列寬拖曳調整
+        function initDragCol(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            isResizingCol = true;
+            activeResizerIndex = parseInt(this.dataset.col);
+            this.classList.add('dragging');
+            
+            const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+            startX = clientX;
+
+            let cols = visibleChannelCount;
+            const val = document.getElementById('gridCountSelect').value;
+            if (val === '2big2small') cols = 4;
+            else if (val === '2up2down') cols = 2;
+            else if (val === '3up3down') cols = 3;
+            else if (val === '4up4down') cols = 4;
+
+            // 測量拖曳前所有欄位的實際像素寬度
+            initialSizes = [];
+            for (let c = 0; c < cols; c++) {
+                const cell = document.getElementById(`ch-container-${c}`);
+                if (cell) {
+                    initialSizes.push(cell.getBoundingClientRect().width);
+                } else {
+                    initialSizes.push(0);
+                }
+            }
+
+            document.addEventListener('mousemove', dragCol);
+            document.addEventListener('mouseup', stopDrag);
+            document.addEventListener('touchmove', dragCol, { passive: false });
+            document.addEventListener('touchend', stopDrag);
+            
+            document.body.style.cursor = 'col-resize';
+        }
+
+        // 執行列寬拖曳計算，並動態更新 Grid 百分比
+        function dragCol(e) {
+            if (!isResizingCol) return;
+            if (e.cancelable) e.preventDefault();
+
+            const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+            const dx = clientX - startX;
+
+            const idx = activeResizerIndex;
+            const minWidth = 100; // 每個格子的最小安全像素寬度
+            
+            let newWidthLeft = initialSizes[idx] + dx;
+            let newWidthRight = initialSizes[idx + 1] - dx;
+
+            // 限制邊界範圍
+            if (newWidthLeft < minWidth) {
+                const diff = minWidth - newWidthLeft;
+                newWidthLeft = minWidth;
+                newWidthRight -= diff;
+            }
+            if (newWidthRight < minWidth) {
+                const diff = minWidth - newWidthRight;
+                newWidthRight = minWidth;
+                newWidthLeft -= diff;
+            }
+
+            const currentSizes = [...initialSizes];
+            currentSizes[idx] = newWidthLeft;
+            currentSizes[idx + 1] = newWidthRight;
+
+            // 轉換為彈性百分比，確保在視窗大小改變時依然維持視覺比例
+            const totalWidth = currentSizes.reduce((a, b) => a + b, 0);
+            const percentages = currentSizes.map(size => (size / totalWidth) * 100);
+
+            grid.style.gridTemplateColumns = percentages.map(p => `${p}%`).join(' ');
+        }
+
+        // 初始化行高拖曳調整
+        function initDragRow(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            isResizingRow = true;
+            activeResizerIndex = parseInt(this.dataset.row);
+            this.classList.add('dragging');
+
+            const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+            startY = clientY;
+
+            let cols = visibleChannelCount;
+            const val = document.getElementById('gridCountSelect').value;
+            if (val === '2big2small') cols = 4;
+            else if (val === '2up2down') cols = 2;
+            else if (val === '3up3down') cols = 3;
+            else if (val === '4up4down') cols = 4;
+
+            // 測量拖曳前所有排的實際像素高度
+            initialSizes = [];
+            const row0Cell = document.getElementById('ch-container-0');
+            const row1Cell = document.getElementById(`ch-container-${cols}`);
+            
+            if (row0Cell) initialSizes.push(row0Cell.getBoundingClientRect().height);
+            if (row1Cell) initialSizes.push(row1Cell.getBoundingClientRect().height);
+
+            document.addEventListener('mousemove', dragRow);
+            document.addEventListener('mouseup', stopDrag);
+            document.addEventListener('touchmove', dragRow, { passive: false });
+            document.addEventListener('touchend', stopDrag);
+
+            document.body.style.cursor = 'row-resize';
+        }
+
+        // 執行行高拖曳計算，並動態更新 Grid 百分比
+        function dragRow(e) {
+            if (!isResizingRow) return;
+            if (e.cancelable) e.preventDefault();
+
+            const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+            const dy = clientY - startY;
+
+            const idx = activeResizerIndex;
+            const minHeight = 100; // 每個格子的最小安全像素高度
+
+            let newHeightTop = initialSizes[idx] + dy;
+            let newHeightBottom = initialSizes[idx + 1] - dy;
+
+            if (newHeightTop < minHeight) {
+                const diff = minHeight - newHeightTop;
+                newHeightTop = minHeight;
+                newHeightBottom -= diff;
+            }
+            if (newHeightBottom < minHeight) {
+                const diff = minHeight - newHeightBottom;
+                newHeightBottom = minHeight;
+                newHeightTop -= diff;
+            }
+
+            const currentSizes = [...initialSizes];
+            currentSizes[idx] = newHeightTop;
+            currentSizes[idx + 1] = newHeightBottom;
+
+            const totalHeight = currentSizes.reduce((a, b) => a + b, 0);
+            const percentages = currentSizes.map(size => (size / totalHeight) * 100);
+
+            grid.style.gridTemplateRows = percentages.map(p => `${p}%`).join(' ');
+        }
+
+        // 停止拖曳並清除監聽器與樣式
+        function stopDrag() {
+            isResizingCol = false;
+            isResizingRow = false;
+            document.body.style.cursor = '';
+            
+            document.querySelectorAll('.resizer-v, .resizer-h').forEach(el => el.classList.remove('dragging'));
+
+            document.removeEventListener('mousemove', dragCol);
+            document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchmove', dragCol);
+            document.removeEventListener('touchend', stopDrag);
+
+            document.removeEventListener('mousemove', dragRow);
+            document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchmove', dragRow);
+            document.removeEventListener('touchend', stopDrag);
+        }
+
+        // 切換影片格子數量（2 ~ 8 格及特殊分格）
+        function changeGridCount(val) {
+            if (val === '2big2small') {
+                visibleChannelCount = 4;
+                grid.style.gridTemplateColumns = '2.5fr 2.5fr 1fr 1fr';
+                grid.style.gridTemplateRows = '';
+            } else if (val === '2up2down') {
+                visibleChannelCount = 4;
+                grid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+                grid.style.gridTemplateRows = 'repeat(2, 1fr)';
+            } else if (val === '3up3down') {
+                visibleChannelCount = 6;
+                grid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+                grid.style.gridTemplateRows = 'repeat(2, 1fr)'; // 雙排均分版面高度
+            } else if (val === '4up4down') {
+                visibleChannelCount = 8;
+                grid.style.gridTemplateColumns = 'repeat(4, 1fr)';
+                grid.style.gridTemplateRows = 'repeat(2, 1fr)'; // 雙排均分版面高度
+            } else {
+                visibleChannelCount = parseInt(val);
+                grid.style.gridTemplateColumns = `repeat(${visibleChannelCount}, 1fr)`;
+                grid.style.gridTemplateRows = '';
+            }
+            
+            channels.forEach((ch, idx) => {
+                const container = document.getElementById(`ch-container-${idx}`);
+                if (idx < visibleChannelCount) {
+                    container.style.display = 'flex';
+                    if (ch.isSuspended && ch.media.length > 0) {
+                        ch.isSuspended = false;
+                        renderMedia(idx, ch.savedTime);
+                    }
+                } else {
+                    container.style.display = 'none';
+                    container.classList.remove('active');
+                    if (activeChannelIdx === idx) {
+                        activeChannelIdx = null;
+                    }
+
+                    if (ch.media.length > 0 && !ch.isSuspended) {
+                        const item = ch.media[ch.cursor];
+                        if (item && item.type === 'video') {
+                            clearTimeout(ch.timer);
+                            ch.savedTime = ch.video.currentTime || 0;
+                            ch.isPlayingBeforeSuspend = !ch.video.paused;
+                            ch.video.pause();
+                            ch.video.removeAttribute('src');
+                            ch.video.load();
+                            ch.isSuspended = true;
+                        }
+                    }
+                }
+            });
+
+            // 每次切換版面分格數量時，重新安裝邊界調控桿
+            setupResizers();
+        }
+
+        // 版面分頁：上4下4 / 8格（單排）。兩個分頁共用同一批 8 個頻道的內容，只改排列方式。
+        function switchLayoutTab(val) {
+            const select = document.getElementById('gridCountSelect');
+            if (select) select.value = val;      // 先更新，setupResizers 會讀取這個值
+            changeGridCount(val);
+            document.querySelectorAll('#layoutTabs .layout-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.layout === val);
+            });
+        }
+
+        function setActiveChannel(idx) {
+            if (idx >= visibleChannelCount) return;
+            activeChannelIdx = idx;
+            channels.forEach((ch, i) => {
+                const el = document.getElementById(`ch-container-${i}`);
+                if (i === idx) el.classList.add('active');
+                else el.classList.remove('active');
+            });
+        }
+
+        function formatSec(s) {
+            const m = Math.floor(s / 60); const sec = Math.floor(s % 60);
+            return `${m.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+        }
+
+
+        // 資料夾模式：一次選取整個資料夾，篩出所有影片後平均分配到 8 個格子循環播放。
+        // 支援直接把「整個資料夾」拖進網頁：遞迴讀取資料夾與子資料夾內的影片。
+        async function readAllDirectoryEntries(reader) {
+            const entries = [];
+            while (true) {
+                const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+                if (!batch.length) break;
+                entries.push(...batch);
+            }
+            return entries;
+        }
+
+        async function collectVideoFilesFromEntry(entry, path = '') {
+            if (!entry) return [];
+
+            if (entry.isFile) {
+                const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+                const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(file.name);
+                if (!isVideo) return [];
+                // 保留相對路徑供排序與檔名顯示使用。
+                try { Object.defineProperty(file, '_dropRelativePath', { value: path + file.name }); } catch (_) {}
+                return [file];
+            }
+
+            if (entry.isDirectory) {
+                const reader = entry.createReader();
+                const children = await readAllDirectoryEntries(reader);
+                const nested = await Promise.all(children.map(child => collectVideoFilesFromEntry(child, path + entry.name + '/')));
+                return nested.flat();
+            }
+
+            return [];
+        }
+
+        // 直接拖曳播放：可拖「整個資料夾」或「多個影片檔」到網頁任何位置。
+        // 優先使用 Chromium 新版 File System Access API；舊版則退回 webkitGetAsEntry。
+        async function collectFromHandle(handle, path = '') {
+            const found = [];
+            if (!handle) return found;
+            if (handle.kind === 'file') {
+                const file = await handle.getFile();
+                if (file.type.startsWith('video/') || /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(file.name)) {
+                    try { Object.defineProperty(file, '_dropRelativePath', { value: path + file.name }); } catch (_) {}
+                    found.push(file);
+                }
+                return found;
+            }
+            if (handle.kind === 'directory') {
+                for await (const [name, child] of handle.entries()) {
+                    found.push(...await collectFromHandle(child, path + handle.name + '/'));
+                }
+            }
+            return found;
+        }
+
+        async function handleFolderDrop(dataTransfer, targetIdx = null) {
+            if (!dataTransfer) return;
+            let videoFiles = [];
+            let droppedDirectory = false;   // 這次拖入的內容是否包含資料夾
+            const items = Array.from(dataTransfer.items || []);
+
+            // 重要：DataTransferItem 只在 drop 事件「同步執行期間」有效，一旦 await 之後就會失效。
+            // 因此必須先「同步」把每個項目的 handle / entry 全部取出，之後才能逐一讀取，
+            // 否則拖入多個資料夾時只有第一個讀得到。
+            const fileItems = items.filter(item => item.kind === 'file');
+            const handlePromises = fileItems.map(item =>
+                typeof item.getAsFileSystemHandle === 'function' ? item.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null)
+            );
+            const entries = fileItems.map(item =>
+                typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null
+            );
+
+            const handles = await Promise.all(handlePromises);
+
+            for (let i = 0; i < fileItems.length; i++) {
+                try {
+                    if (handles[i] && handles[i].kind === 'directory') droppedDirectory = true;
+                    else if (entries[i] && entries[i].isDirectory) droppedDirectory = true;
+
+                    if (handles[i]) {
+                        // Chrome / Edge：File System Access API。
+                        videoFiles.push(...await collectFromHandle(handles[i], ''));
+                    } else if (entries[i]) {
+                        // 相容模式：webkitGetAsEntry，可遞迴讀取資料夾。
+                        videoFiles.push(...await collectVideoFilesFromEntry(entries[i], ''));
+                    }
+                } catch (err) {
+                    console.warn('讀取拖入項目失敗：', err);
+                    // 該項目失敗時，嘗試改用 entry 讀取
+                    try {
+                        if (entries[i]) videoFiles.push(...await collectVideoFilesFromEntry(entries[i], ''));
+                    } catch (_) {}
+                }
+            }
+
+            // 最後退回一般檔案拖曳。
+            if (!videoFiles.length) {
+                videoFiles = Array.from(dataTransfer.files || []).filter(file =>
+                    file.type.startsWith('video/') || /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(file.name)
+                );
+            }
+
+            videoFiles.sort((a, b) => {
+                const an = a._dropRelativePath || a.webkitRelativePath || a.name;
+                const bn = b._dropRelativePath || b.webkitRelativePath || b.name;
+                return an.localeCompare(bn, undefined, { numeric: true, sensitivity: 'base' });
+            });
+
+            if (!videoFiles.length) {
+                showMessage('沒有讀到可播放的影片。請使用 Chrome / Edge，從 Windows 檔案總管直接把資料夾拖進這個網頁。');
+                return;
+            }
+
+            // 分批加入模式：只累積，不播放。
+            if (stagingMode) {
+                addToStaging(videoFiles);
+                return;
+            }
+
+            // 只拖入影片檔（沒有資料夾），且放開位置在某一格影格內：
+            // 就從該格開始載入，不清除其他格子；一支影片就只在該格播放。
+            if (!droppedDirectory && targetIdx !== null && targetIdx < visibleChannelCount) {
+                stopAutoFolder(true);
+                folderGroups = [];          // 這不是資料夾模式，K 鍵不再切換資料夾
+                currentFolderIdx = 0;
+                distributeLoadedFiles(videoFiles, targetIdx);
+                return;
+            }
+
+            distributeFolderVideosAcrossChannels(videoFiles);
+        }
+
+        // 網頁任何位置都接受拖曳；放開滑鼠後立即讀取並播放。
+        ['dragenter', 'dragover'].forEach(type => {
+            window.addEventListener(type, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            }, false);
+        });
+        window.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 必須在 await 之前同步判斷放開時落在哪一格影格。
+            const cell = e.target && e.target.closest ? e.target.closest('[id^="ch-container-"]') : null;
+            const targetIdx = cell ? parseInt(cell.id.replace('ch-container-', ''), 10) : null;
+            await handleFolderDrop(e.dataTransfer, Number.isNaN(targetIdx) ? null : targetIdx);
+        }, false);
+
+        // 從手機相簿（或系統檔案選擇器）挑選影片與照片。
+        // 每次挑選視為一個「相簿」；在「分批加入」模式下，多次挑選會各自成為一組，
+        // 可以用 K / J / L / H 在各組之間切換。
+        let photoPickCount = 0;
+        function processPhotoFiles(files) {
+            if (!files || !files.length) return;
+            const media = Array.from(files).filter(f =>
+                f.type.startsWith('video/') || f.type.startsWith('image/') ||
+                /\.(mp4|webm|ogg|mov|m4v|avi|mkv|jpe?g|png|gif|webp|heic|bmp)$/i.test(f.name));
+            const masterInput = document.getElementById('masterFileInput');
+            if (!media.length) {
+                showMessage('沒有選到可播放的影片或照片。');
+                if (masterInput) masterInput.value = '';
+                return;
+            }
+            photoPickCount++;
+            const album = `相簿 ${photoPickCount}`;
+            media.forEach(f => {
+                try { Object.defineProperty(f, '_dropRelativePath', { value: `${album}/${f.name}` }); } catch (_) {}
+            });
+            if (stagingMode) addToStaging(media);
+            else distributeFolderVideosAcrossChannels(media);
+            if (masterInput) masterInput.value = '';   // 讓同一批檔案可以再次選取
+        }
+
+        function processFolderFiles(files) {
+            if (!files || !files.length) return;
+            const videoFiles = Array.from(files)
+                .filter(file => file.type.startsWith('video/') || /\.(mp4|webm|ogg|mov|m4v|avi|mkv)$/i.test(file.name))
+                .sort((a, b) => {
+                    const an = a.webkitRelativePath || a.name;
+                    const bn = b.webkitRelativePath || b.name;
+                    return an.localeCompare(bn, undefined, { numeric: true, sensitivity: 'base' });
+                });
+
+            if (videoFiles.length === 0) {
+                showMessage("這個資料夾裡沒有找到可播放的影片檔案。");
+                return;
+            }
+
+            // 將資料夾內影片依序平均分配到 8 個格子；每格播放不同影片。
+            distributeFolderVideosAcrossChannels(videoFiles);
+
+            const masterInput = document.getElementById('masterFileInput');
+            if (masterInput) masterInput.value = '';
+        }
+
+
+        // ===== 多資料夾切換（K 鍵）=====
+        // 依「檔案所在的資料夾」分組；拖入多個資料夾時，一次只播放一個資料夾的內容，
+        // 按 K 鍵即切換到下一個資料夾（最後一個之後會回到第一個）。
+        let folderGroups = [];      // [{ name, files }]
+        let currentFolderIdx = 0;
+
+        function getFolderKey(file) {
+            const path = file._dropRelativePath || file.webkitRelativePath || file.name;
+            const i = path.lastIndexOf('/');
+            return i >= 0 ? path.slice(0, i) : '';
+        }
+
+        function buildFolderGroups(videoFiles) {
+            const map = new Map();
+            videoFiles.forEach(file => {
+                const key = getFolderKey(file);
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(file);
+            });
+            return Array.from(map, ([key, files]) => ({
+                name: key ? key.split('/').pop() : '（根目錄）',
+                files
+            }));
+        }
+
+        function showToast(text) {
+            const el = document.getElementById('toast');
+            if (!el) return;
+            el.innerText = text;
+            el.classList.remove('opacity-0');
+            clearTimeout(showToast._t);
+            showToast._t = setTimeout(() => el.classList.add('opacity-0'), 2000);
+        }
+
+        // 把指定資料夾的影片依序輪流分配到各頻道
+        function loadFolderGroup(groupIdx, keepView = false) {
+            const group = folderGroups[groupIdx];
+            if (!group) return;
+
+            const buckets = Array.from({ length: visibleChannelCount }, () => []);
+            group.files.forEach((file, index) => {
+                buckets[index % visibleChannelCount].push(file);
+            });
+
+            buckets.forEach((bucket, idx) => {
+                if (bucket.length > 0) loadToChannel(bucket, idx, keepView);
+                else clearChannel(idx, keepView);   // 這個資料夾影片較少時，多出來的頻道清空
+            });
+        }
+
+        // 切換到指定資料夾並顯示提示
+        function goToFolder(idx) {
+            currentFolderIdx = idx;
+            loadFolderGroup(currentFolderIdx, true);   // 保留目前的縮放／旋轉設定
+            const g = folderGroups[currentFolderIdx];
+            showToast(`資料夾 ${currentFolderIdx + 1} / ${folderGroups.length}：${g.name}（${g.files.length} 支影片）`);
+        }
+
+        // 回傳 true 表示可以切換（至少要有 2 個資料夾）
+        function canSwitchFolder() {
+            if (folderGroups.length === 0) { showToast('尚未載入資料夾'); return false; }
+            if (folderGroups.length === 1) { showToast('目前只有一個資料夾'); return false; }
+            return true;
+        }
+
+        // dir = 1：下一個資料夾（K）；dir = -1：上一個資料夾（J）。頭尾會循環。
+        function stepFolder(dir) {
+            if (!canSwitchFolder()) return;
+            goToFolder((currentFolderIdx + dir + folderGroups.length) % folderGroups.length);
+        }
+
+        // 隨機選一個資料夾（L），不會連續選到目前這個。
+        function randomFolder() {
+            if (!canSwitchFolder()) return;
+            let idx;
+            do { idx = Math.floor(Math.random() * folderGroups.length); }
+            while (idx === currentFolderIdx);
+            goToFolder(idx);
+        }
+
+        // H 鍵：開關「每 10 秒自動隨機切換資料夾」。
+        const AUTO_FOLDER_INTERVAL_MS = 10000;
+        let autoFolderTimer = null;
+        let autoFolderQueue = [];   // 這一輪還沒播過的資料夾（洗牌後依序播放，播完一輪才會重複）
+
+        // 重新洗牌一輪；第一個不能是目前正在播的，避免輪與輪交界處連續重複。
+        function refillAutoFolderQueue() {
+            const ids = folderGroups.map((_, i) => i);
+            for (let i = ids.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [ids[i], ids[j]] = [ids[j], ids[i]];
+            }
+            if (ids[0] === currentFolderIdx) {
+                const k = 1 + Math.floor(Math.random() * (ids.length - 1));
+                [ids[0], ids[k]] = [ids[k], ids[0]];
+            }
+            autoFolderQueue = ids;
+        }
+
+        function autoNextFolder() {
+            if (autoFolderQueue.length === 0) refillAutoFolderQueue();
+            goToFolder(autoFolderQueue.shift());
+        }
+
+        function stopAutoFolder(silent = false) {
+            if (autoFolderTimer === null) return;
+            clearInterval(autoFolderTimer);
+            autoFolderTimer = null;
+            autoFolderQueue = [];
+            if (!silent) showToast('已停止自動切換資料夾');
+        }
+
+        function toggleAutoFolder() {
+            if (autoFolderTimer !== null) { stopAutoFolder(); return; }
+            if (!canSwitchFolder()) return;
+            // 目前這個資料夾視為已播過，先排出其餘資料夾。
+            autoFolderQueue = [];
+            refillAutoFolderQueue();
+            autoFolderQueue = autoFolderQueue.filter(i => i !== currentFolderIdx);
+            autoFolderTimer = setInterval(() => {
+                if (folderGroups.length < 2) { stopAutoFolder(); return; }
+                autoNextFolder();
+            }, AUTO_FOLDER_INTERVAL_MS);
+            showToast('已開啟：每 10 秒隨機輪播資料夾，播完一輪才重複（再按 H 停止）');
+        }
+
+        function nextFolder() { stepFolder(1); }
+        function prevFolder() { stepFolder(-1); }
+
+        // ===== 分批加入模式 =====
+        // 預設關閉（所有舊行為不變）。開啟後，拖入的資料夾只會累積到暫存清單，
+        // 可以分多次拖入；按「執行」才一次載入並開始播放。
+        let stagingMode = false;
+        let stagedFiles = [];
+        const stagedKeys = new Set();
+
+        function stagedFolderCount() {
+            return buildFolderGroups(stagedFiles).length;
+        }
+
+        function updateStagingUI() {
+            const toggle = document.getElementById('stageToggleBtn');
+            const run = document.getElementById('stageRunBtn');
+            const clear = document.getElementById('stageClearBtn');
+            if (!toggle) return;
+            toggle.innerText = stagingMode ? `分批加入：開（${stagedFolderCount()} 個資料夾）` : '分批加入：關';
+            toggle.classList.toggle('active', stagingMode);
+            run.style.display = stagingMode ? '' : 'none';
+            clear.style.display = stagingMode ? '' : 'none';
+        }
+
+        function toggleStagingMode() {
+            stagingMode = !stagingMode;
+            updateStagingUI();
+            showToast(stagingMode ? '分批加入已開啟：可多次拖入資料夾，按「執行」才開始播放' : '分批加入已關閉（已累積的內容仍保留）');
+        }
+
+        function addToStaging(videoFiles) {
+            let added = 0;
+            videoFiles.forEach(f => {
+                const key = `${f._dropRelativePath || f.webkitRelativePath || f.name}|${f.size}|${f.lastModified}`;
+                if (stagedKeys.has(key)) return;
+                stagedKeys.add(key);
+                stagedFiles.push(f);
+                added++;
+            });
+            updateStagingUI();
+            showToast(`已加入 ${added} 支影片｜累積 ${stagedFolderCount()} 個資料夾、${stagedFiles.length} 支影片（按「執行」開始播放）`);
+        }
+
+        function clearStaged() {
+            stagedFiles = [];
+            stagedKeys.clear();
+            updateStagingUI();
+            showToast('已清空累積的資料夾');
+        }
+
+        function runStaged() {
+            if (!stagedFiles.length) { showToast('尚未加入任何資料夾'); return; }
+            const files = stagedFiles.slice();
+            stagedFiles = [];
+            stagedKeys.clear();
+            updateStagingUI();
+            distributeFolderVideosAcrossChannels(files);   // 之後 K / J / L / H 照常運作
+        }
+
+        function distributeFolderVideosAcrossChannels(videoFiles) {
+            if (!videoFiles || !videoFiles.length || visibleChannelCount <= 0) return;
+
+            // 先清空所有格，避免上一次拖曳留下舊影片。
+            clearAllChannels();
+
+            stopAutoFolder(true);
+            folderGroups = buildFolderGroups(videoFiles);
+            currentFolderIdx = 0;
+
+            if (folderGroups.length > 1) {
+                loadFolderGroup(0);
+                showToast(`已載入 ${folderGroups.length} 個資料夾，K 下一個、J 上一個、L 隨機、H 自動切換｜1 / ${folderGroups.length}：${folderGroups[0].name}`);
+            } else {
+                // 只有一個資料夾：維持原本行為。
+                loadFolderGroup(0);
+            }
+        }
+
+        async function processFiles(files, startIdx) {
+            if (!files.length) return;
+            const fileList = Array.from(files);
+
+            const zipFile = fileList.find(f => f.name.endsWith('.zip') || f.type === 'application/zip' || f.type === 'application/x-zip-compressed');
+
+            if (zipFile) {
+                try {
+                    showMessage("正在打開並解壓縮媒體專案包...");
+                    const zip = await JSZip.loadAsync(zipFile);
+                    const zipEntries = [];
+
+                    zip.forEach((relativePath, zipEntry) => {
+                        if (!zipEntry.dir && /\.(jpe?g|png|gif|webp|bmp|svg|mp4|webm|ogg|mov)$/i.test(zipEntry.name)) {
+                            zipEntries.push(zipEntry);
+                        }
+                    });
+
+                    zipEntries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+                    if (zipEntries.length === 0) {
+                        showMessage("ZIP 壓縮檔中沒有找到支援的圖片或影片檔案。");
+                        return;
+                    }
+
+                    const extractedFiles = [];
+                    for (const entry of zipEntries) {
+                        const blob = await entry.async("blob");
+                        const ext = entry.name.split('.').pop().toLowerCase();
+                        let mimeType = 'image/jpeg';
+                        
+                        if (['mp4', 'webm', 'ogg', 'mov'].includes(ext)) {
+                            mimeType = `video/${ext === 'mov' ? 'quicktime' : ext}`;
+                        } else if (['png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+                            mimeType = `image/${ext === 'svg' ? 'svg+xml' : ext}`;
+                        }
+
+                        const fileObj = new File([blob], entry.name, { type: mimeType });
+                        extractedFiles.push(fileObj);
+                    }
+
+                    distributeLoadedFiles(extractedFiles, startIdx);
+                } catch (err) {
+                    console.error(err);
+                    showMessage("打開 ZIP 檔案失敗，請確保該檔案未損壞。");
+                }
+            } else {
+                distributeLoadedFiles(fileList, startIdx);
+            }
+
+            const masterInput = document.getElementById('masterFileInput');
+            if (masterInput) masterInput.value = '';
+            for (let i = 0; i < channelCount; i++) {
+                const subInput = document.getElementById(`input-${i}`);
+                if (subInput) subInput.value = '';
+            }
+        }
+
+        // 全域循環媒體分發：不論拖到哪一格，都會從該格開始，循環使用全部 8 個頻道。
+        // 例如拖到第 7 格時，分配順序會是 7 → 8 → 1 → 2 → ...，大量影片會平均形成各格播放清單。
+        function distributeLoadedFiles(fileList, startIdx) {
+            if (!fileList || fileList.length === 0 || visibleChannelCount <= 0) return;
+
+            startIdx = Number.isFinite(Number(startIdx)) ? Number(startIdx) : 0;
+            startIdx = ((startIdx % visibleChannelCount) + visibleChannelCount) % visibleChannelCount;
+
+            const buckets = Array.from({ length: visibleChannelCount }, () => []);
+
+            fileList.forEach((file, index) => {
+                // 從拖放的格子開始，超過第 8 格就自動繞回第 1 格。
+                const targetChannelIdx = (startIdx + index) % visibleChannelCount;
+                buckets[targetChannelIdx].push(file);
+            });
+
+            buckets.forEach((bucket, targetChannelIdx) => {
+                if (bucket.length > 0) {
+                    loadToChannel(bucket, targetChannelIdx);
+                }
+            });
+        }
+
+        function loadToChannel(list, idx, keepView = false) {
+            if (idx >= visibleChannelCount) return;
+            const ch = channels[idx];
+            clearTimeout(ch.timer);
+            ch.media.forEach(m => URL.revokeObjectURL(m.url));
+            ch.media = list.map(f => ({ url: URL.createObjectURL(f), type: f.type.startsWith('video/') ? 'video' : 'img', name: f.name || '未命名檔案' }));
+            ch.cursor = 0;
+            ch.isSuspended = false;
+            ch.savedTime = 0;
+            ch.isPlayingBeforeSuspend = true;
+            ch.dropZone.classList.add('hidden');
+            renderMedia(idx);
+            if (!keepView) {
+                resetView(idx);
+                setActiveChannel(idx);
+            }
+        }
+
+        function nextMedia(idx) {
+            const ch = channels[idx];
+            ch.cursor = (ch.cursor + 1) % ch.media.length;
+            ch.isSuspended = false;
+            ch.savedTime = 0;
+            renderMedia(idx);
+        }
+
+        function prevMedia(idx) {
+            const ch = channels[idx];
+            ch.cursor = (ch.cursor - 1 + ch.media.length) % ch.media.length;
+            ch.isSuspended = false;
+            ch.savedTime = 0;
+            renderMedia(idx);
+        }
+
+        function nextAll() {
+            channels.forEach((ch, idx) => {
+                if (idx < visibleChannelCount && ch.media.length > 1) {
+                    nextMedia(idx);
+                }
+            });
+        }
+
+        function prevAll() {
+            channels.forEach((ch, idx) => {
+                if (idx < visibleChannelCount && ch.media.length > 1) {
+                    prevMedia(idx);
+                }
+            });
+        }
+
+        function shuffleChannel(idx) {
+            if (idx >= visibleChannelCount) return;
+            const ch = channels[idx];
+            if (!ch) return;
+            if (ch.media.length === 0) {
+                showMessage(`第 0${idx+1} 頻道沒有媒體檔案，請先上傳！`);
+                return;
+            }
+
+            if (ch.media.length >= 2) {
+                const mediaList = [...ch.media];
+                for (let i = mediaList.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [mediaList[i], mediaList[j]] = [mediaList[j], mediaList[i]];
+                }
+                ch.media = mediaList;
+            }
+            ch.cursor = 0;
+            ch.isSuspended = false;
+            ch.savedTime = 0;
+            renderMedia(idx);
+        }
+
+        function shuffleAll() {
+            let shuffledAny = false;
+            channels.forEach((ch, idx) => {
+                if (idx < visibleChannelCount && ch.media.length > 0) {
+                    if (ch.media.length >= 2) {
+                        const mediaList = [...ch.media];
+                        for (let i = mediaList.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [mediaList[i], mediaList[j]] = [mediaList[j], mediaList[i]];
+                        }
+                        ch.media = mediaList;
+                    }
+                    ch.cursor = 0;
+                    ch.isSuspended = false;
+                    ch.savedTime = 0;
+                    renderMedia(idx);
+                    shuffledAny = true;
+                }
+            });
+            if (!shuffledAny) {
+                showMessage("所有頻道都沒有媒體檔案，請先拖放或點擊上傳檔案！");
+            }
+        }
+
+        function triggerShuffleMaster() {
+            shuffleAll();
+        }
+
+        function renderMedia(idx, seekToTime = null) {
+            const ch = channels[idx];
+            const item = ch.media[ch.cursor];
+            if (!item) return;
+
+            const filenameEl = document.getElementById(`filename-${idx}`);
+            if (filenameEl) {
+                const currentName = item.name || '未命名檔案';
+                filenameEl.innerText = currentName;
+                filenameEl.title = currentName;
+            }
+
+            clearTimeout(ch.timer);
+            if (item.type === 'video') {
+                ch.img.style.display = 'none'; ch.video.style.display = 'block';
+                ch.seekBox.style.visibility = 'visible';
+                
+                let currentPath = '';
+                try { currentPath = ch.video.src ? new URL(ch.video.src).pathname : ''; } catch(e) { currentPath = ''; }
+                let newPath = '';
+                try { newPath = item.url ? new URL(item.url).pathname : ''; } catch(e) { newPath = ''; }
+                
+                if (currentPath !== newPath) {
+                    ch.video.src = item.url;
+                }
+                
+                ch.video.playbackRate = parseFloat(ch.speedRange.value);
+                ch.video.muted = ch.isMuted;
+                ch.video.volume = 1;
+
+                if (seekToTime !== null) {
+                    const onMetadata = () => {
+                        ch.video.currentTime = seekToTime;
+                        if (ch.isPlayingBeforeSuspend !== false) {
+                            ch.video.play().catch(() => {});
+                        }
+                        ch.video.removeEventListener('loadedmetadata', onMetadata);
+                    };
+                    ch.video.addEventListener('loadedmetadata', onMetadata);
+                } else {
+                    ch.video.play().catch(() => {});
+                }
+            } else {
+                ch.video.pause(); 
+                ch.video.removeAttribute('src');
+                ch.video.load();
+                ch.video.style.display = 'none';
+                
+                ch.img.style.display = 'block';
+                ch.seekBox.style.visibility = 'hidden';
+                ch.img.src = item.url;
+                if (ch.media.length > 1) {
+                    ch.timer = setTimeout(() => nextMedia(idx), imageDuration);
+                }
+            }
+        }
+
+        function clearChannel(idx, keepView = false) {
+            const ch = channels[idx];
+            clearTimeout(ch.timer);
+            ch.media.forEach(m => URL.revokeObjectURL(m.url));
+            ch.media = [];
+            ch.cursor = 0;
+            ch.isSuspended = false;
+            ch.savedTime = 0;
+            ch.video.pause();
+            ch.video.removeAttribute('src');
+            ch.video.load();
+            ch.video.style.display = 'none';
+            ch.img.removeAttribute('src');
+            ch.img.style.display = 'none';
+            ch.seek.value = 0;
+            const curTxt = document.getElementById(`cur-${idx}`);
+            const totTxt = document.getElementById(`tot-${idx}`);
+            if (curTxt) curTxt.innerText = "00:00";
+            if (totTxt) totTxt.innerText = "00:00";
+            const filenameEl = document.getElementById(`filename-${idx}`);
+            if (filenameEl) {
+                filenameEl.innerText = "尚未載入檔案";
+                filenameEl.title = "尚未載入檔案";
+            }
+            ch.dropZone.classList.remove('hidden');
+            document.getElementById(`ch-container-${idx}`).classList.remove('active');
+            if (!keepView) resetView(idx);
+        }
+
+        function clearAllChannels() {
+            activeChannelIdx = null;
+            channels.forEach((ch, idx) => clearChannel(idx));
+        }
+
+        // 切換指定頻道的聲音開／關，各頻道互不影響
+        function toggleChannelSound(idx) {
+            if (idx >= visibleChannelCount) return;
+            const ch = channels[idx];
+            if (!ch) return;
+
+            ch.isMuted = !ch.isMuted;
+            ch.video.muted = ch.isMuted;
+            ch.video.volume = 1;
+
+            if (ch.soundLabel) {
+                ch.soundLabel.innerText = ch.isMuted ? '靜音' : '有聲';
+            }
+            if (ch.soundButton) {
+                ch.soundButton.title = ch.isMuted ? '開啟此頻道聲音' : '關閉此頻道聲音';
+                ch.soundButton.classList.toggle('bg-purple-500/20', !ch.isMuted);
+                ch.soundButton.classList.toggle('border-purple-400/50', !ch.isMuted);
+            }
+            if (ch.soundIcon) {
+                ch.soundIcon.innerHTML = ch.isMuted
+                    ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5L6 9H3v6h3l5 4V5zm8.5 4.5l-5 5m0-5l5 5"></path>'
+                    : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5L6 9H3v6h3l5 4V5zm4.5 4a4 4 0 010 6m2.5-8.5a7 7 0 010 11"></path>';
+            }
+        }
+
+        function cycleRotation(idx) {
+            const ch = channels[idx];
+            ch.targetRotate = (ch.targetRotate + 90) % 360;
+            ch.needsTransformUpdate = true;
+            const rotVal = document.getElementById(`rot-val-${idx}`);
+            if (rotVal) rotVal.innerText = ch.targetRotate + '°';
+        }
+
+        // 全域旋轉功能：控制所有可見格子同時進行旋轉
+        function rotateAll(degrees) {
+            channels.forEach((ch, idx) => {
+                if (idx < visibleChannelCount) {
+                    ch.targetRotate = (ch.targetRotate + degrees + 360) % 360;
+                    ch.needsTransformUpdate = true;
+                    const rotVal = document.getElementById(`rot-val-${idx}`);
+                    if (rotVal) rotVal.innerText = ch.targetRotate + '°';
+                }
+            });
+        }
+
+        function updateView(idx) {
+            const ch = channels[idx];
+            ch.targetScale = parseFloat(ch.zoomRange.value);
+            ch.needsTransformUpdate = true;
+        }
+
+        function resetView(idx) { 
+            const ch = channels[idx];
+            ch.zoomRange.value = 1; 
+            ch.targetScale = 1;
+            ch.targetX = 0;
+            ch.targetY = 0;
+            ch.targetRotate = 0;
+            ch.needsTransformUpdate = true;
+            const rotVal = document.getElementById(`rot-val-${idx}`);
+            if (rotVal) rotVal.innerText = '0°';
+        }
+
+        function adjustZoom(delta) {
+            const slider = document.getElementById('globalZoom');
+            const newScale = Math.min(5, Math.max(1, parseFloat(slider.value) + delta));
+            slider.value = newScale;
+            handleGlobalZoom(newScale);
+        }
+
+        function handleGlobalZoom(v) { 
+            const scaleVal = parseFloat(v);
+            channels.forEach((ch) => { 
+                ch.zoomRange.value = scaleVal; 
+                ch.targetScale = scaleVal;
+                ch.needsTransformUpdate = true;
+            }); 
+        }
+
+        function handleGlobalY(v) {
+            const yOffset = parseFloat(v);
+            channels.forEach((ch) => { 
+                if (ch.targetScale > 1) { 
+                    ch.targetY = yOffset; 
+                    ch.needsTransformUpdate = true;
+                } 
+            });
+        }
+
+        function adjustGlobalY(delta) {
+            const slider = document.getElementById('globalY');
+            const newVal = parseInt(slider.value) + delta;
+            slider.value = newVal; handleGlobalY(newVal);
+        }
+
+        function handleGlobalSpeed(v) {
+            currentGlobalSpeed = parseFloat(v);
+            document.getElementById('speedVal').innerText = currentGlobalSpeed.toFixed(1) + 'x';
+            channels.forEach(ch => {
+                ch.speedRange.value = currentGlobalSpeed;
+                ch.speedDisplay.innerText = currentGlobalSpeed.toFixed(1) + 'x';
+                if (ch.video && ch.video.style.display !== 'none' && !ch.isSuspended) {
+                    ch.video.playbackRate = currentGlobalSpeed;
+                }
+            });
+        }
+
+        function adjustGlobalSpeed(delta) {
+            const slider = document.getElementById('globalSpeed');
+            const newSpeed = Math.min(4.0, Math.max(0.1, parseFloat((parseFloat(slider.value) + delta).toFixed(1))));
+            slider.value = newSpeed;
+            handleGlobalSpeed(newSpeed);
+        }
+
+        function controlAll(act) {
+            let masterPause = false;
+            if (act === 'toggle') {
+                const activeCh = channels.slice(0, visibleChannelCount).find(ch => !ch.isSuspended && ch.media.length && ch.video.style.display !== 'none');
+                if (activeCh) masterPause = !activeCh.video.paused;
+            }
+            channels.forEach((ch, idx) => {
+                if (idx < visibleChannelCount && !ch.isSuspended && ch.media.length && ch.video && ch.video.style.display !== 'none') {
+                    if (act === 'play') ch.video.play();
+                    if (act === 'pause') ch.video.pause();
+                    if (act === 'toggle') { if (masterPause) ch.video.pause(); else ch.video.play(); }
+                }
+            });
+        }
+
+        function skipSingleChannel(idx, seconds) {
+            if (idx >= visibleChannelCount) return;
+            const ch = channels[idx];
+            if (ch && !ch.isSuspended && ch.media.length && ch.video && ch.video.style.display !== 'none') {
+                if (ch.video.duration) {
+                    let newTime = ch.video.currentTime + seconds;
+                    if (newTime < 0) newTime = 0;
+                    if (newTime > ch.video.duration) newTime = ch.video.duration;
+                    ch.video.currentTime = newTime;
+                }
+            }
+        }
+
+        function skipAll(seconds) {
+            channels.forEach((ch, idx) => {
+                if (idx < visibleChannelCount && !ch.isSuspended && ch.media.length && ch.video && ch.video.style.display !== 'none') {
+                    if (ch.video.duration) {
+                        let newTime = ch.video.currentTime + seconds;
+                        if (newTime < 0) newTime = 0;
+                        if (newTime > ch.video.duration) newTime = ch.video.duration;
+                        ch.video.currentTime = newTime;
+                    }
+                }
+            });
+        }
+
+        // 全螢幕：優先使用瀏覽器的全螢幕功能；iPhone Safari 等不支援（或被擋住）時，
+        // 改用「模擬全螢幕」：隱藏控制介面、讓畫面佔滿整個可用區域，行為和真正的全螢幕一致。
+        let pseudoFs = false;
+
+        function isFs() { return !!document.fullscreenElement || pseudoFs; }
+
+        function applyFsUI(active) {
+            const btn = document.getElementById('fsToggleBtn');
+            const closeFsBtn = document.getElementById('closeFsBtn');
+            const closeFsKeepBtn = document.getElementById('closeFsKeepBtn');
+            document.documentElement.classList.toggle('pseudo-fs', pseudoFs && active);
+
+            if (active) {
+                document.body.classList.add('fullscreen-active');
+                if (btn) btn.innerText = "退出並清除";
+                [closeFsBtn, closeFsKeepBtn].forEach(el => {
+                    if (el) { el.classList.remove('hidden'); el.classList.add('flex'); }
+                });
+            } else {
+                document.body.classList.remove('fullscreen-active');
+                if (btn) btn.innerText = "全螢幕";
+                [closeFsBtn, closeFsKeepBtn].forEach(el => {
+                    if (el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+                });
+                if (!keepMediaOnExit) { clearAllChannels(); }
+                keepMediaOnExit = false;
+            }
+        }
+
+        function startPseudoFs() {
+            pseudoFs = true;
+            applyFsUI(true);
+        }
+
+        function enterFs() {
+            const el = document.documentElement;
+            const req = el.requestFullscreen || el.webkitRequestFullscreen;
+            if (!req) { startPseudoFs(); return; }
+            try {
+                const r = req.call(el);
+                if (r && typeof r.catch === 'function') r.catch(() => startPseudoFs());
+            } catch (_) {
+                startPseudoFs();
+            }
+        }
+
+        function leaveFs() {
+            if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (pseudoFs) {
+                pseudoFs = false;
+                applyFsUI(false);
+            }
+        }
+
+        function toggleFullscreen() {
+            if (isFs()) {
+                keepMediaOnExit = false;
+                leaveFs();
+            } else {
+                enterFs();
+            }
+        }
+
+        function exitFullscreenKeep() {
+            if (isFs()) {
+                keepMediaOnExit = true;
+                leaveFs();
+            }
+        }
+
+        document.addEventListener('fullscreenchange', () => {
+            applyFsUI(!!document.fullscreenElement);
+        });
+
+        // R 鍵／重播按鈕：將目前每一格正在播放的影片從頭再播放一次，播放清單與分配不變
+        function replayCurrentVideos() {
+            channels.forEach((ch, idx) => {
+                if (idx >= visibleChannelCount || !ch || !ch.media || ch.media.length === 0) return;
+                const item = ch.media[ch.cursor];
+                if (!item || item.type !== 'video') return;
+
+                clearTimeout(ch.timer);
+                ch.isSuspended = false;
+                ch.savedTime = 0;
+                try {
+                    ch.video.currentTime = 0;
+                    ch.video.playbackRate = parseFloat(ch.speedRange.value);
+                    ch.video.muted = ch.isMuted;
+                    const playPromise = ch.video.play();
+                    if (playPromise && typeof playPromise.catch === 'function') playPromise.catch(() => {});
+                } catch (err) {
+                    renderMedia(idx, 0);
+                }
+            });
+        }
+
+        function showMessage(text) {
+            document.getElementById('messageText').innerText = text;
+            document.getElementById('messageBox').style.display = 'block';
+        }
+
+        function closeMessage() { document.getElementById('messageBox').style.display = 'none'; }
+
+        window.addEventListener('keydown', (e) => { 
+            if (e.code === 'Space') { 
+                e.preventDefault(); 
+                controlAll('toggle'); 
+            } else if (e.key === 'a' || e.key === 'A') {
+                e.preventDefault();
+                prevAll();
+            } else if (e.key === 's' || e.key === 'S') {
+                e.preventDefault();
+                nextAll();
+            } else if (e.key === 'q' || e.key === 'Q') {
+                e.preventDefault();
+                skipAll(-5);
+            } else if (e.key === 'w' || e.key === 'W') {
+                e.preventDefault();
+                skipAll(5);
+            } else if (e.key === 'o' || e.key === 'O') {
+                e.preventDefault();
+                adjustGlobalSpeed(-0.1);
+            } else if (e.key === 'p' || e.key === 'P') {
+                e.preventDefault();
+                adjustGlobalSpeed(0.1);
+            } else if (e.key === 'd' || e.key === 'D') {
+                e.preventDefault();
+                triggerShuffleMaster();
+            } else if (e.key === 'k' || e.key === 'K') {
+                e.preventDefault();
+                nextFolder();
+            } else if (e.key === 'j' || e.key === 'J') {
+                e.preventDefault();
+                prevFolder();
+            } else if (e.key === 'l' || e.key === 'L') {
+                e.preventDefault();
+                randomFolder();
+            } else if (e.key === 'h' || e.key === 'H') {
+                e.preventDefault();
+                toggleAutoFolder();
+            } else if (e.key === 'e' || e.key === 'E') {
+                e.preventDefault();
+                const fileInput = document.getElementById('masterFileInput');
+                if (fileInput) fileInput.click();
+            } else if (e.key === 'f' || e.key === 'F') {
+                e.preventDefault();
+                toggleFullscreen();
+            } else if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault();
+                replayCurrentVideos();
+            } else if (e.key === 'z' || e.key === 'Z') {
+                e.preventDefault();
+                rotateAll(-90); // 逆時針轉 90 度
+            } else if (e.key === 'x' || e.key === 'X') {
+                e.preventDefault();
+                rotateAll(90);  // 順時針轉 90 度
+            } else if (e.key === '8') {
+                e.preventDefault();
+                adjustGlobalY(-10);
+            } else if (e.key === '2') {
+                e.preventDefault();
+                adjustGlobalY(10);
+            } else if (e.key === 'F1') {
+                e.preventDefault();
+                exitFullscreenKeep();
+            } else if (e.key === 'ArrowLeft') {
+                if (activeChannelIdx !== null && activeChannelIdx < visibleChannelCount) {
+                    e.preventDefault();
+                    skipSingleChannel(activeChannelIdx, -5);
+                }
+            } else if (e.key === 'ArrowRight') {
+                if (activeChannelIdx !== null && activeChannelIdx < visibleChannelCount) {
+                    e.preventDefault();
+                    skipSingleChannel(activeChannelIdx, 5);
+                }
+            } else if (e.key === '-' || e.code === 'Minus' || e.code === 'NumpadSubtract') {
+                e.preventDefault();
+                adjustZoom(-0.1);
+            } else if (e.key === '+' || e.key === '=' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+                e.preventDefault();
+                adjustZoom(0.1);
+            }
+        });
+
+        // 新增右鍵快捷鍵：等同於 D 鍵（隨機打亂所有頻道的媒體播放）
+        window.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); // 阻止系統右鍵預設選單彈出
+            triggerShuffleMaster();
+        });
+
+        let hideTimer;
+        const resetIdleTimer = () => {
+            const ctrl = document.getElementById('masterControls');
+            document.body.classList.remove('user-idle');
+            ctrl.style.opacity = '1';
+            clearTimeout(hideTimer);
+            hideTimer = setTimeout(() => {
+                document.body.classList.add('user-idle');
+                ctrl.style.opacity = '0';
+            }, 3000);
+        };
+        // 滑鼠移動、點擊與觸控時，正常喚醒控制介面與滑鼠游標
+        ['mousemove', 'mousedown', 'touchstart'].forEach(e => document.addEventListener(e, resetIdleTimer));
+
+        // 鍵盤操作時通常會喚醒控制介面；但全螢幕模式下按 A、S、D 時維持隱藏游標
+        document.addEventListener('keydown', (e) => {
+            const isFullscreenAsdKey = isFs() && ['a', 's', 'd'].includes(e.key.toLowerCase());
+            if (isFullscreenAsdKey) return;
+
+            // K 鍵（切換資料夾）：不要喚醒控制介面，反而立即隱藏，
+            // 之後只有滑鼠移動、點擊或觸控時才會再出現。
+            if (['k', 'K', 'j', 'J', 'l', 'L', 'h', 'H'].includes(e.key)) {
+                clearTimeout(hideTimer);
+                document.body.classList.add('user-idle');
+                document.getElementById('masterControls').style.opacity = '0';
+                return;
+            }
+            resetIdleTimer();
+        });
+
+        resetIdleTimer();
+
+        // 啟動初始化調控桿與預設 8 頻道佈局
+        changeGridCount('5');
+    </script>
+
+<script>
+    // 註冊 Service Worker（需要 https 或 localhost）；失敗不影響一般使用。
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        });
+    }
+</script>
+</body>
+</html>
