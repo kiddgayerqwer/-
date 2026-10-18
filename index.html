@@ -354,12 +354,15 @@
             <!-- 全螢幕按鈕 -->
             <button class="btn btn-outline" id="fsToggleBtn" onclick="toggleFullscreen()">全螢幕</button>
         </div>
-            </div>
 
-            <!-- 全局縮放（已從功能列隱藏，快捷鍵仍可使用） -->
-            <div class="hidden">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">全局大小</span>
-                <input type="range" id="globalZoom" class="custom-range w-20" min="1" max="5" step="0.01" value="1" oninput="handleGlobalZoom(this.value)">
+        <!-- 全部放大縮小：一次調整所有影片的大小 -->
+        <div class="flex flex-col mt-3">
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest">全部放大縮小</span>
+                <span id="globalZoomVal" class="text-[9px] font-mono text-purple-400 font-bold">1.0x</span>
+            </div>
+            <input type="range" id="globalZoom" class="custom-range w-full" min="1" max="5" step="0.01" value="1" oninput="handleGlobalZoom(this.value)">
+        </div>
             </div>
 
             <!-- 全局垂直位置（已從功能列隱藏，快捷鍵仍可使用） -->
@@ -1741,6 +1744,8 @@
 
         function handleGlobalZoom(v) { 
             const scaleVal = parseFloat(v);
+            const zv = document.getElementById('globalZoomVal');
+            if (zv) zv.innerText = scaleVal.toFixed(1) + 'x';
             channels.forEach((ch) => { 
                 ch.zoomRange.value = scaleVal; 
                 ch.targetScale = scaleVal;
