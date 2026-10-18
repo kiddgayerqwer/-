@@ -1933,7 +1933,28 @@
 
         function closeMessage() { document.getElementById('messageBox').style.display = 'none'; }
 
+        // 音量 + 鍵：播放下一輪影片（所有格子各自換下一部，等同 S 鍵）
+        const isVolumeUpKey = (e) => e.key === 'AudioVolumeUp' || e.key === 'VolumeUp' || e.code === 'AudioVolumeUp' || e.keyCode === 175 || e.keyCode === 183 || e.keyCode === 24;
+        let lastVolumeNext = 0;
+        function volumeUpNext() {
+            const now = Date.now();
+            if (now - lastVolumeNext < 300) return;   // 防止長按連續觸發太快
+            lastVolumeNext = now;
+            nextAll();
+            if (typeof showToast === 'function') showToast('下一輪影片');
+        }
+
+        // 藍牙遙控器／耳機的「下一首」鍵也當成下一輪
+        if ('mediaSession' in navigator) {
+            try { navigator.mediaSession.setActionHandler('nexttrack', volumeUpNext); } catch (err) {}
+        }
+
         window.addEventListener('keydown', (e) => { 
+            if (isVolumeUpKey(e)) {
+                e.preventDefault();
+                volumeUpNext();
+                return;
+            }
             if (e.code === 'Space') { 
                 e.preventDefault(); 
                 controlAll('toggle'); 
