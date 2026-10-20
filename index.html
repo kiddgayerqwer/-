@@ -342,7 +342,7 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁</span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-2</span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
                     <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
@@ -2101,7 +2101,17 @@
     // 註冊 Service Worker（需要 https 或 localhost）；失敗不影響一般使用。
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js').catch(() => {});
+            // updateViaCache: 'none' 讓瀏覽器每次都檢查 sw.js 有沒有新版
+            navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+                .then(reg => reg.update())
+                .catch(() => {});
+            // 新版生效時自動重新整理一次，馬上換成新畫面
+            let reloaded = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (reloaded) return;
+                reloaded = true;
+                location.reload();
+            });
         });
     }
 </script>
