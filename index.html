@@ -253,6 +253,21 @@
             white-space: nowrap;
         }
 
+        /* 手機直立等窄螢幕：主控台縮進畫面內，不超出邊界 */
+        @media (max-width: 640px) {
+            .master-controls {
+                padding: 12px 14px;
+                border-radius: 20px;
+                width: calc(100vw - 24px);
+                white-space: normal;
+            }
+            .master-controls > :first-child { display: none; }
+            .master-controls > :nth-child(2) { width: 100%; padding: 0; }
+            .master-controls > :nth-child(2) > div { width: 100%; }
+            #layoutTabs { flex-wrap: wrap; }
+            .master-controls .btn { flex: 1 1 0; justify-content: center; padding-left: 8px; padding-right: 8px; }
+        }
+
         /* 全螢幕狀態下強行滑動隱藏頂部主控台，防止遮擋任何監控畫面 */
         body.fullscreen-active .master-controls {
             opacity: 0 !important;
@@ -332,11 +347,13 @@
                     <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
                     <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
                     <button type="button" class="layout-tab" data-layout="3" onclick="switchLayoutTab('3')">3格</button>
+                    <button type="button" class="layout-tab" data-layout="2up2down" onclick="switchLayoutTab('2up2down')">上2下2</button>
                 </div>
                 <select id="gridCountSelect" class="hidden" aria-hidden="true" tabindex="-1">
                     <option value="5" selected>5格</option>
                     <option value="4">4格</option>
                     <option value="3">3格</option>
+                    <option value="2up2down">上2下2</option>
                 </select>
 
         <div class="flex gap-3 mt-3">
