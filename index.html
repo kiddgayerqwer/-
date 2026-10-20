@@ -345,7 +345,7 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-3</span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-4 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
                     <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
@@ -2095,6 +2095,32 @@
         });
 
         resetIdleTimer();
+
+        // iPhone 主畫面 App 模式：iOS 會把可用高度少算一段（約等於瀏海/動態島高度），
+        // 造成下方黑邊。這裡直接用整支手機的螢幕尺寸把影片牆撐滿。
+        function fitGridToScreen() {
+            const g = document.getElementById('videoGrid');
+            if (!g) return;
+            const iosStandalone = window.navigator.standalone === true;
+            const info = document.getElementById('screenInfo');
+            if (!iosStandalone) {
+                g.style.width = ''; g.style.height = ''; g.style.right = ''; g.style.bottom = '';
+                if (info) info.innerText = '';
+                return;
+            }
+            const long = Math.max(screen.width, screen.height);
+            const short = Math.min(screen.width, screen.height);
+            const portrait = window.innerHeight >= window.innerWidth;
+            const w = Math.max(portrait ? short : long, window.innerWidth);
+            const h = Math.max(portrait ? long : short, window.innerHeight);
+            g.style.right = 'auto'; g.style.bottom = 'auto';
+            g.style.width = w + 'px'; g.style.height = h + 'px';
+            if (info) info.innerText = `· ${window.innerWidth}x${window.innerHeight}→${w}x${h}`;
+        }
+        fitGridToScreen();
+        window.addEventListener('resize', fitGridToScreen);
+        window.addEventListener('orientationchange', () => setTimeout(fitGridToScreen, 300));
+        window.addEventListener('load', fitGridToScreen);
 
         // 啟動初始化調控桿與預設 8 頻道佈局
         changeGridCount('5');
