@@ -17,7 +17,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
         :root { color-scheme: dark; }
-        html { height: 100%; }
+        html { height: 100%; height: 100dvh; background: #000; }
         :root {
             --accent: #a855f7;
             --accent-hover: #9333ea;
@@ -40,8 +40,11 @@
             display: grid;
             grid-template-columns: repeat(8, 1fr);
             gap: 0;
-            height: 100%;
-            width: 100%;
+            /* 固定貼滿整個螢幕（含 iPhone 底部橫條與瀏海區），不留下方邊界 */
+            position: fixed;
+            top: 0; right: 0; bottom: 0; left: 0;
+            width: auto;
+            height: auto;
         }
 
         @media (max-width: 1200px) {
@@ -342,7 +345,7 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-2</span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-3</span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
                     <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
