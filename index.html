@@ -17,7 +17,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
         :root { color-scheme: dark; }
-        html { height: 100%; height: 100dvh; background: #000; }
+        html { height: 100%; background: #000; }
+        /* iOS 26 主畫面 App 的已知問題（WebKit 301108）：可用高度少了狀態列那一段，
+           下方會留黑邊。把整頁撐高到含狀態列的高度，iOS 就會把畫面給滿。 */
+        @media (display-mode: standalone), (display-mode: fullscreen) {
+            html { min-height: min(100lvh, calc(100% + env(safe-area-inset-top))); }
+        }
         :root {
             --accent: #a855f7;
             --accent-hover: #9333ea;
@@ -345,7 +350,7 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-4 <span id="screenInfo"></span></span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/21-5 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
                     <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
@@ -2096,31 +2101,16 @@
 
         resetIdleTimer();
 
-        // iPhone 主畫面 App 模式：iOS 會把可用高度少算一段（約等於瀏海/動態島高度），
-        // 造成下方黑邊。這裡直接用整支手機的螢幕尺寸把影片牆撐滿。
-        function fitGridToScreen() {
-            const g = document.getElementById('videoGrid');
-            if (!g) return;
-            const iosStandalone = window.navigator.standalone === true;
+        // 診斷資訊：只在 iPhone 主畫面 App 顯示目前的畫面高度，方便確認是否填滿
+        function showScreenInfo() {
             const info = document.getElementById('screenInfo');
-            if (!iosStandalone) {
-                g.style.width = ''; g.style.height = ''; g.style.right = ''; g.style.bottom = '';
-                if (info) info.innerText = '';
-                return;
-            }
-            const long = Math.max(screen.width, screen.height);
-            const short = Math.min(screen.width, screen.height);
-            const portrait = window.innerHeight >= window.innerWidth;
-            const w = Math.max(portrait ? short : long, window.innerWidth);
-            const h = Math.max(portrait ? long : short, window.innerHeight);
-            g.style.right = 'auto'; g.style.bottom = 'auto';
-            g.style.width = w + 'px'; g.style.height = h + 'px';
-            if (info) info.innerText = `· ${window.innerWidth}x${window.innerHeight}→${w}x${h}`;
+            if (!info || window.navigator.standalone !== true) return;
+            const g = document.getElementById('videoGrid');
+            info.innerText = `· ${window.innerHeight}/${screen.height} 牆${g ? Math.round(g.getBoundingClientRect().height) : '-'}`;
         }
-        fitGridToScreen();
-        window.addEventListener('resize', fitGridToScreen);
-        window.addEventListener('orientationchange', () => setTimeout(fitGridToScreen, 300));
-        window.addEventListener('load', fitGridToScreen);
+        window.addEventListener('resize', showScreenInfo);
+        window.addEventListener('load', showScreenInfo);
+        setTimeout(showScreenInfo, 1000);
 
         // 啟動初始化調控桿與預設 8 頻道佈局
         changeGridCount('5');
