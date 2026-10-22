@@ -130,7 +130,7 @@
         const root = el(`
         <div id="vault" aria-hidden="true">
             <div class="v-lock">
-                <h2>🔒 私密相簿</h2>
+                <h2>🔒 App</h2>
                 <p id="vPinMsg">請輸入密碼</p>
                 <div class="v-dots" id="vDots"><span></span><span></span><span></span><span></span></div>
                 <div class="v-pad" id="vPad">
@@ -142,7 +142,7 @@
             </div>
             <div class="v-album" id="vAlbum">
                 <div class="v-top">
-                    <h2>私密相簿</h2>
+                    <h2>App</h2>
                     <button type="button" class="v-btn" id="vSelectBtn">選取</button>
                     <button type="button" class="v-btn" id="vMoreBtn">⋯</button>
                     <button type="button" class="v-btn" id="vLockBtn">鎖上</button>
