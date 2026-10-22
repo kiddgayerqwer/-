@@ -100,6 +100,7 @@
     .v-chip.on { background: rgba(168,85,247,.55); border-color: #a855f7; color: #fff; }
     .v-grid { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px; padding: 0 4px 12px; align-content: start; }
     .v-item { position: relative; aspect-ratio: 9/16; background: #15151c; border-radius: 6px; overflow: hidden; border: none; padding: 0; }
+    .v-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 28px; color: rgba(255,255,255,.35); background: linear-gradient(160deg, #1d1b2e, #0d0d14); }
     .v-item img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
     .v-item .v-dur { position: absolute; right: 5px; bottom: 4px; font-size: 11px; font-weight: 700; text-shadow: 0 1px 3px #000; }
     .v-item .v-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 5px 4px; font-size: 10px; text-align: left; background: linear-gradient(transparent, rgba(0,0,0,.75)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 36px; }
@@ -283,6 +284,7 @@
         [...selected].forEach(id => { if (!items.some(i => i.id === id)) selected.delete(id); });
         renderFolders(all);
         renderGrid();
+        if (all.some(i => !i.thumb && !i.thumbFailed)) fixMissingThumbs();
     }
 
     function renderFolders(all) {
@@ -313,7 +315,8 @@
         }
         items.forEach(it => {
             const b = el(`<button type="button" class="v-item${selected.has(it.id) ? ' sel' : ''}" data-id="${it.id}"><span class="v-check">✓</span></button>`);
-            if (it.thumb) { const u = URL.createObjectURL(it.thumb); thumbUrls.push(u); const img = document.createElement('img'); img.src = u; img.alt = ''; b.prepend(img); }
+            if (it.thumb) setTileThumb(b, it.thumb);
+            else b.prepend(el(`<span class="v-ph">${it.type === 'video' ? '▶' : '🖼'}</span>`));
             const n = document.createElement('span'); n.className = 'v-name'; n.textContent = it.name; b.appendChild(n);
             const d = document.createElement('span'); d.className = 'v-dur'; d.textContent = it.type === 'video' ? fmtDur(it.duration) : '圖'; b.appendChild(d);
             g.appendChild(b);
@@ -336,39 +339,117 @@
     }
 
     // ---------- 匯入 ----------
-    function makeThumb(file) {
+    const VIDEO_EXT = /\.(mp4|m4v|mov|webm|ogv|3gp|mkv)$/i;
+    const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i;
+    function kindOf(f) {
+        if ((f.type || '').startsWith('video/') || VIDEO_EXT.test(f.name || '')) return 'video';
+        if ((f.type || '').startsWith('image/') || IMAGE_EXT.test(f.name || '')) return 'img';
+        return null;
+    }
+
+    // 把畫面縮成 240px 寬的 JPEG 預覽圖；全黑的畫面視為失敗（iPhone 有時會先給黑畫面）
+    function snapshot(src, w, h) {
         return new Promise(resolve => {
-            const isVideo = file.type.startsWith('video/');
-            const url = URL.createObjectURL(file);
-            let done = false;
-            const finish = (thumb, duration) => { if (done) return; done = true; URL.revokeObjectURL(url); resolve({ thumb, duration }); };
-            const drawFrom = (src, w, h, duration) => {
-                try {
-                    const W = 240, H = Math.round(W * (h / w)) || 427;
-                    const c = document.createElement('canvas'); c.width = W; c.height = H;
-                    c.getContext('2d').drawImage(src, 0, 0, W, H);
-                    c.toBlob(b => finish(b, duration), 'image/jpeg', 0.7);
-                } catch (e) { finish(null, duration); }
-            };
-            setTimeout(() => finish(null, 0), 8000);
-            if (isVideo) {
-                const v = document.createElement('video');
-                v.muted = true; v.playsInline = true; v.preload = 'auto';
-                v.onloadedmetadata = () => { try { v.currentTime = Math.min(1, (v.duration || 2) / 3); } catch (e) {} };
-                v.onseeked = () => drawFrom(v, v.videoWidth, v.videoHeight, v.duration);
-                v.onerror = () => finish(null, 0);
-                v.src = url;
-            } else {
-                const img = new Image();
-                img.onload = () => drawFrom(img, img.naturalWidth, img.naturalHeight, 0);
-                img.onerror = () => finish(null, 0);
-                img.src = url;
-            }
+            try {
+                if (!w || !h) return resolve(null);
+                const W = 240, H = Math.max(1, Math.round(W * (h / w)));
+                const c = document.createElement('canvas'); c.width = W; c.height = H;
+                const ctx = c.getContext('2d');
+                ctx.drawImage(src, 0, 0, W, H);
+                const px = ctx.getImageData(0, 0, W, H).data;
+                let sum = 0; for (let i = 0; i < px.length; i += 400) sum += px[i] + px[i + 1] + px[i + 2];
+                if (sum < 30) return resolve(null);
+                c.toBlob(b => resolve(b), 'image/jpeg', 0.75);
+            } catch (e) { resolve(null); }
         });
     }
 
+    // iPhone 的 Safari 不播放就不解碼畫面，所以：放進畫面外、靜音播放一下、跳到 1 秒附近再截圖
+    function videoThumb(blob) {
+        return new Promise(resolve => {
+            const url = URL.createObjectURL(blob);
+            const v = document.createElement('video');
+            v.muted = true; v.defaultMuted = true; v.playsInline = true;
+            v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+            v.preload = 'auto';
+            v.style.cssText = 'position:fixed;left:-10px;top:-10px;width:4px;height:4px;opacity:0.01;pointer-events:none;z-index:-1';
+            document.body.appendChild(v);
+            let done = false, tries = 0;
+            const finish = thumb => {
+                if (done) return; done = true;
+                const duration = isFinite(v.duration) ? v.duration : 0;
+                try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+                v.remove(); URL.revokeObjectURL(url);
+                resolve({ thumb, duration });
+            };
+            const targets = () => { const d = isFinite(v.duration) && v.duration > 0 ? v.duration : 3; return [Math.min(1, d / 3), Math.min(2.5, d / 2), d * 0.75, 0.05]; };
+            const grab = async () => {
+                if (done) return;
+                const t = await snapshot(v, v.videoWidth, v.videoHeight);
+                if (t) return finish(t);
+                tries++;
+                const next = targets()[tries];
+                if (next === undefined) return finish(null);
+                try { v.currentTime = next; } catch (e) { finish(null); }
+            };
+            v.addEventListener('seeked', () => setTimeout(grab, 80));
+            v.addEventListener('loadeddata', () => {
+                const go = () => { try { v.currentTime = targets()[0]; } catch (e) { grab(); } };
+                const p = v.play();
+                if (p && p.then) p.then(() => { v.pause(); go(); }).catch(go); else go();
+            }, { once: true });
+            v.addEventListener('error', () => finish(null));
+            setTimeout(() => finish(null), 15000);
+            v.src = url;
+            v.load();
+        });
+    }
+
+    function imageThumb(blob) {
+        return new Promise(resolve => {
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            const end = t => { URL.revokeObjectURL(url); resolve({ thumb: t, duration: 0 }); };
+            img.onload = async () => end(await snapshot(img, img.naturalWidth, img.naturalHeight));
+            img.onerror = () => end(null);
+            setTimeout(() => end(null), 10000);
+            img.src = url;
+        });
+    }
+
+    function makeThumb(file, kind) { return (kind || kindOf(file)) === 'video' ? videoThumb(file) : imageThumb(file); }
+
+    // 解鎖後，替還沒有預覽圖的舊檔案補做預覽圖（一次一個，做好就更新畫面）
+    let fixing = false;
+    async function fixMissingThumbs() {
+        if (fixing) return; fixing = true;
+        try {
+            const all = await reqP(tx('items').objectStore('items').getAll());
+            for (const it of all.filter(i => !i.thumb && !i.thumbFailed)) {
+                if (!unlocked) break;
+                const blob = await reqP(tx('blobs').objectStore('blobs').get(it.id));
+                if (!blob) continue;
+                const { thumb, duration } = await makeThumb(blob, it.type);
+                const t = tx('items', 'readwrite'); const s = t.objectStore('items');
+                const cur = await reqP(s.get(it.id));
+                if (cur) { if (thumb) cur.thumb = thumb; else cur.thumbFailed = true; if (!cur.duration && duration) cur.duration = duration; s.put(cur); }
+                await doneP(t);
+                const tile = document.querySelector(`.v-item[data-id="${it.id}"]`);
+                if (tile && thumb) setTileThumb(tile, thumb);
+                const mi = items.find(x => x.id === it.id); if (mi && thumb) mi.thumb = thumb;
+            }
+        } catch (e) { console.error(e); }
+        fixing = false;
+    }
+
+    function setTileThumb(tile, thumb) {
+        tile.querySelectorAll('img, .v-ph').forEach(x => x.remove());
+        const u = URL.createObjectURL(thumb); thumbUrls.push(u);
+        const img = document.createElement('img'); img.src = u; img.alt = ''; tile.prepend(img);
+    }
+
     async function importFiles(files) {
-        files = files.filter(f => f.type.startsWith('video/') || f.type.startsWith('image/'));
+        files = files.filter(f => kindOf(f));
         if (!files.length) return;
         await openDB();
         const folder = currentFolder === ALL ? UNFILED : currentFolder;
@@ -379,9 +460,12 @@
             const f = files[i];
             prog.innerText = `匯入中 ${i + 1} / ${files.length}：${f.name}`;
             try {
+                prog.innerText = `匯入中 ${i + 1} / ${files.length}：${f.name}（製作預覽圖）`;
                 const { thumb, duration } = await makeThumb(f);
                 const t = tx(['items', 'blobs'], 'readwrite');
-                const meta = { name: f.name, type: f.type.startsWith('video/') ? 'video' : 'img', mime: f.type, size: f.size, folder, added: Date.now() + i, duration: duration || 0, thumb };
+                const kind = kindOf(f);
+                const mime = f.type || (kind === 'video' ? (/\.mov$/i.test(f.name) ? 'video/quicktime' : 'video/mp4') : 'image/jpeg');
+                const meta = { name: f.name, type: kind, mime, size: f.size, folder, added: Date.now() + i, duration: duration || 0, thumb, thumbFailed: !thumb };
                 const idReq = t.objectStore('items').add(meta);
                 idReq.onsuccess = () => t.objectStore('blobs').put(f, idReq.result);
                 await doneP(t);
