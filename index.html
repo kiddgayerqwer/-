@@ -211,6 +211,27 @@
             cursor: pointer;
         }
 
+        /* 主控台的滑桿：圓點加大、可觸控範圍加高，手指比較好拉 */
+        .master-controls .custom-range {
+            height: 34px;
+            background: transparent;
+            touch-action: none;
+        }
+        .master-controls .custom-range::-webkit-slider-runnable-track {
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.15);
+        }
+        .master-controls .custom-range::-webkit-slider-thumb {
+            width: 28px;
+            height: 28px;
+            margin-top: -11px;
+            border: 3px solid #fff;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }
+        .master-controls .custom-range::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.15); }
+        .master-controls .custom-range::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; }
+
         /* 主功能欄：固定在螢幕上方並向下移動 3 公分，並調整陰影朝向下方 */
         .layout-tab {
             color: rgba(255,255,255,0.55);
@@ -341,7 +362,7 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-9 <span id="screenInfo"></span></span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-10 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="2up2down" onclick="switchLayoutTab('2up2down')">上2下2</button>
                     <button type="button" class="layout-tab" data-layout="3rows" onclick="switchLayoutTab('3rows')">上中下</button>
