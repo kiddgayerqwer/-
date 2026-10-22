@@ -213,13 +213,14 @@
         build();
         const v = document.getElementById('vault');
         v.classList.add('open'); v.setAttribute('aria-hidden', 'false');
-        if (unlocked && Date.now() - lastActive < AUTO_LOCK_MS) { lastActive = Date.now(); refresh(); }
-        else { unlocked = false; v.classList.remove('unlocked'); startPin('unlock'); }
+        // 每次打開都要重新輸入密碼
+        unlocked = false; v.classList.remove('unlocked'); startPin('unlock');
     }
     function close() {
         const v = document.getElementById('vault'); if (!v) return;
         v.classList.remove('open'); v.setAttribute('aria-hidden', 'true');
         closeSheet();
+        if (unlocked) lock();   // 關閉（包含播放後自動關閉）就上鎖
     }
     function lock() {
         unlocked = false;
