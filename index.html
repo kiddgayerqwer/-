@@ -341,7 +341,7 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-8 <span id="screenInfo"></span></span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-9 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="2up2down" onclick="switchLayoutTab('2up2down')">上2下2</button>
                     <button type="button" class="layout-tab" data-layout="3rows" onclick="switchLayoutTab('3rows')">上中下</button>
@@ -389,9 +389,13 @@
         <div class="flex flex-col mt-3">
             <div class="flex justify-between items-center mb-1">
                 <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest">全部放大縮小</span>
-                <span id="globalZoomVal" class="text-[9px] font-mono text-purple-400 font-bold">1.0x</span>
+                <span id="globalZoomVal" class="text-[9px] font-mono text-purple-400 font-bold cursor-pointer" ondblclick="setGlobalZoomSlider(0)" title="點兩下回到原尺寸">1.0x</span>
             </div>
-            <input type="range" id="globalZoom" class="custom-range w-full" min="1" max="5" step="0.01" value="1" oninput="handleGlobalZoom(this.value)">
+            <div class="flex items-center gap-2">
+                <span class="text-[9px] font-bold text-white/40">小</span>
+                <input type="range" id="globalZoom" class="custom-range w-full" min="-100" max="100" step="1" value="0" oninput="setGlobalZoomSlider(this.value)">
+                <span class="text-[9px] font-bold text-white/40">大</span>
+            </div>
         </div>
 
         <!-- 上下位置：一次把所有影片往上或往下移（點兩下數值可歸零） -->
@@ -575,7 +579,7 @@
             state.wrapper.onwheel = (e) => {
                 e.preventDefault();
                 const delta = e.deltaY > 0 ? -0.1 : 0.1;
-                const newScale = Math.min(5, Math.max(1, parseFloat(state.zoomRange.value) + delta));
+                const newScale = Math.min(5, Math.max(0.2, parseFloat(state.zoomRange.value) + delta));
                 state.zoomRange.value = newScale;
                 state.targetScale = newScale;
                 state.needsTransformUpdate = true;
@@ -593,7 +597,7 @@
             };
 
             // 行動裝置觸控：兩指捏合縮放（以手指中心為準），放大後一指拖曳平移
-            const MIN_SCALE = 1, MAX_SCALE = 5;
+            const MIN_SCALE = 0.2, MAX_SCALE = 5;
             const tDist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
             const startPinch = (e) => {
                 const [a, b] = e.touches;
@@ -651,7 +655,7 @@
                 state.pinching = false;
                 state.dragging = false;
                 // 縮回原尺寸時，畫面自動回正
-                if (state.targetScale <= 1.02) {
+                if (state.targetScale >= 0.98 && state.targetScale <= 1.02) {
                     state.targetScale = 1; state.zoomRange.value = 1;
                     state.targetX = 0; state.targetY = 0;
                     state.needsTransformUpdate = true;
@@ -1778,17 +1782,24 @@
             if (rotVal) rotVal.innerText = '0°';
         }
 
+        // 全部放大縮小滑桿：中間 = 原尺寸 1x，往右放大到 5x，往左縮小到 0.2x
+        const zoomFromSlider = v => Math.pow(5, Math.max(-100, Math.min(100, v)) / 100);
+        const sliderFromZoom = z => Math.round(Math.log(z) / Math.log(5) * 100);
+        function setGlobalZoomSlider(v) {
+            v = Math.max(-100, Math.min(100, parseFloat(v) || 0));
+            const slider = document.getElementById('globalZoom');
+            if (slider) slider.value = v;
+            handleGlobalZoom(v === 0 ? 1 : zoomFromSlider(v));
+        }
         function adjustZoom(delta) {
             const slider = document.getElementById('globalZoom');
-            const newScale = Math.min(5, Math.max(1, parseFloat(slider.value) + delta));
-            slider.value = newScale;
-            handleGlobalZoom(newScale);
+            setGlobalZoomSlider(parseFloat(slider.value) + (delta > 0 ? 5 : -5));
         }
 
         function handleGlobalZoom(v) { 
             const scaleVal = parseFloat(v);
             const zv = document.getElementById('globalZoomVal');
-            if (zv) zv.innerText = scaleVal.toFixed(1) + 'x';
+            if (zv) zv.innerText = (scaleVal < 1 ? scaleVal.toFixed(2) : scaleVal.toFixed(1)) + 'x';
             channels.forEach((ch) => { 
                 ch.zoomRange.value = scaleVal; 
                 ch.targetScale = scaleVal;
