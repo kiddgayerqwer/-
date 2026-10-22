@@ -351,17 +351,15 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-4 <span id="screenInfo"></span></span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-5 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
-                    <button type="button" class="layout-tab active" data-layout="5" onclick="switchLayoutTab('5')">5格</button>
-                    <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
+                    <button type="button" class="layout-tab active" data-layout="4" onclick="switchLayoutTab('4')">4格</button>
                     <button type="button" class="layout-tab" data-layout="3" onclick="switchLayoutTab('3')">3格</button>
                     <button type="button" class="layout-tab" data-layout="2up2down" onclick="switchLayoutTab('2up2down')">上2下2</button>
                     <button type="button" class="layout-tab" data-layout="3rows" onclick="switchLayoutTab('3rows')">上中下</button>
                 </div>
                 <select id="gridCountSelect" class="hidden" aria-hidden="true" tabindex="-1">
-                    <option value="5" selected>5格</option>
-                    <option value="4">4格</option>
+                    <option value="4" selected>4格</option>
                     <option value="3">3格</option>
                     <option value="2up2down">上2下2</option>
                     <option value="3rows">上中下</option>
@@ -2135,7 +2133,7 @@
         setTimeout(showScreenInfo, 1000);
 
         // 啟動初始化調控桿與預設 8 頻道佈局
-        changeGridCount('5');
+        changeGridCount('4');
     </script>
 
 <script>
