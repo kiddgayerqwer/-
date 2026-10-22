@@ -1,7 +1,7 @@
 // 網頁本身：先連網取最新版，失敗才用快取（所以更新後重開就會是新版）。
 // 其他資源（圖示、Tailwind、JSZip）：先用快取，背景更新。第一次連網載入後即可離線開啟。
-const CACHE = 'wall-v15';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'wall-v16';
+const CORE = ['./', './index.html', './manifest.webmanifest', './vault.js', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
@@ -20,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (!['http:', 'https:'].includes(url.protocol)) return;   // 不處理 blob: 影片等
 
-  const isPage = req.mode === 'navigate' || (url.origin === location.origin && /\/(index\.html)?$/.test(url.pathname));
+  const isPage = req.mode === 'navigate' || (url.origin === location.origin && /(\/|\.html|\.js)$/.test(url.pathname));
   if (isPage) {
     e.respondWith(
       fetch(req.url, { cache: 'no-store', credentials: 'same-origin' }).then(res => {
