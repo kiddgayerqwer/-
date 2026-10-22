@@ -351,14 +351,16 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-6 <span id="screenInfo"></span></span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-7 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="2up2down" onclick="switchLayoutTab('2up2down')">上2下2</button>
                     <button type="button" class="layout-tab" data-layout="3rows" onclick="switchLayoutTab('3rows')">上中下</button>
+                    <button type="button" class="layout-tab" data-layout="2rows" onclick="switchLayoutTab('2rows')">上1下1</button>
                 </div>
                 <select id="gridCountSelect" class="hidden" aria-hidden="true" tabindex="-1">
                     <option value="2up2down" selected>上2下2</option>
                     <option value="3rows">上中下</option>
+                    <option value="2rows">上1下1</option>
                 </select>
 
         <div class="flex gap-3 mt-3">
@@ -750,6 +752,9 @@
             } else if (val === '3rows') {
                 cols = 1;
                 rows = 3;
+            } else if (val === '2rows') {
+                cols = 1;
+                rows = 2;
             } else if (val === '3up3down') {
                 cols = 3;
                 rows = 2;
@@ -803,7 +808,7 @@
             const val = document.getElementById('gridCountSelect').value;
             if (val === '2big2small') cols = 4;
             else if (val === '2up2down') cols = 2;
-            else if (val === '3rows') cols = 1;
+            else if (val === '3rows' || val === '2rows') cols = 1;
             else if (val === '3up3down') cols = 3;
             else if (val === '4up4down') cols = 4;
 
@@ -879,7 +884,7 @@
             const val = document.getElementById('gridCountSelect').value;
             if (val === '2big2small') cols = 4;
             else if (val === '2up2down') cols = 2;
-            else if (val === '3rows') cols = 1;
+            else if (val === '3rows' || val === '2rows') cols = 1;
             else if (val === '3up3down') cols = 3;
             else if (val === '4up4down') cols = 4;
 
@@ -959,6 +964,10 @@
                 visibleChannelCount = 4;
                 grid.style.gridTemplateColumns = '2.5fr 2.5fr 1fr 1fr';
                 grid.style.gridTemplateRows = '';
+            } else if (val === '2rows') {
+                visibleChannelCount = 2;
+                grid.style.gridTemplateColumns = '1fr';
+                grid.style.gridTemplateRows = 'repeat(2, 1fr)';
             } else if (val === '3rows') {
                 visibleChannelCount = 3;
                 grid.style.gridTemplateColumns = '1fr';
