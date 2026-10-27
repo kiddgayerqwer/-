@@ -362,16 +362,18 @@
         <div class="flex items-center gap-4 px-2">
             <!-- 切換影片格子數量 -->
             <div class="flex flex-col">
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/22-10 <span id="screenInfo"></span></span></span>
+                <span class="text-[9px] font-bold text-white/40 uppercase tracking-widest mb-1">版面分頁 <span class="text-white/25 normal-case tracking-normal">· 版本 10/28-1 <span id="screenInfo"></span></span></span>
                 <div id="layoutTabs" class="flex gap-1 bg-white/5 rounded-lg border border-white/10 p-0.5">
                     <button type="button" class="layout-tab active" data-layout="2up2down" onclick="switchLayoutTab('2up2down')">上2下2</button>
                     <button type="button" class="layout-tab" data-layout="3rows" onclick="switchLayoutTab('3rows')">上中下</button>
                     <button type="button" class="layout-tab" data-layout="2rows" onclick="switchLayoutTab('2rows')">上1下1</button>
+                    <button type="button" class="layout-tab" data-layout="4" onclick="switchLayoutTab('4')">左右4格</button>
                 </div>
                 <select id="gridCountSelect" class="hidden" aria-hidden="true" tabindex="-1">
                     <option value="2up2down" selected>上2下2</option>
                     <option value="3rows">上中下</option>
                     <option value="2rows">上1下1</option>
+                    <option value="4">左右4格</option>
                 </select>
 
         <div class="flex gap-3 mt-3">
