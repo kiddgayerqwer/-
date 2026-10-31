@@ -114,6 +114,22 @@
     .v-bar .v-btn { flex: 1 1 auto; }
     .v-progress { padding: 0 14px 8px; font-size: 12px; color: #c4b5fd; display: none; }
     .v-progress.on { display: block; }
+    .v-cloud { position: absolute; inset: 0; z-index: 5; background: #07070a; display: none; flex-direction: column;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+    .v-cloud.open { display: flex; }
+    .v-cloud-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+    .v-cloud-body .v-grid { overflow: visible; }
+    .v-select-grid .v-check { display: flex; color: transparent; }
+    .v-select-grid .v-item.sel .v-check { color: #fff; }
+    .v-item.got { opacity: .45; }
+    .v-crumb { padding: 4px 14px 10px; font-size: 13px; color: rgba(255,255,255,.6); }
+    .v-crumb button { background: none; border: none; color: #c4b5fd; padding: 2px 0; font-weight: 700; }
+    .v-row { text-align: left; display: flex; gap: 8px; align-items: center; margin: 0 14px; }
+    .v-setup { padding: 8px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 14px; line-height: 1.6; color: rgba(255,255,255,.8); }
+    .v-setup p { margin: 0; }
+    .v-setup input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: #000; color: #fff; font-size: 15px; -webkit-user-select: text; user-select: text; }
+    .v-hint { font-size: 12px; color: rgba(255,255,255,.5); }
+    .v-hint code, .v-setup code { color: #c4b5fd; word-break: break-all; -webkit-user-select: text; user-select: text; }
     .v-sheet { position: fixed; inset: 0; z-index: 510; background: rgba(0,0,0,.55); display: none; align-items: flex-end; justify-content: center; }
     .v-sheet.open { display: flex; }
     .v-sheet > div { width: 100%; max-width: 480px; background: #12121a; border-radius: 18px 18px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
@@ -144,6 +160,7 @@
                 <div class="v-top">
                     <h2>App</h2>
                     <button type="button" class="v-btn" id="vSelectBtn">選取</button>
+                    <button type="button" class="v-btn" id="vCloudBtn">☁ 雲端</button>
                     <button type="button" class="v-btn" id="vMoreBtn">⋯</button>
                     <button type="button" class="v-btn" id="vLockBtn">鎖上</button>
                 </div>
@@ -183,6 +200,7 @@
         root.querySelector('#vDeleteBtn').onclick = deleteSelected;
         root.querySelector('#vMoveBtn').onclick = moveSheet;
         root.querySelector('#vMoreBtn').onclick = moreSheet;
+        root.querySelector('#vCloudBtn').onclick = () => Cloud.show();
         root.querySelector('#vSheet').addEventListener('click', e => { if (e.target.id === 'vSheet') closeSheet(); });
         root.querySelector('#vGrid').addEventListener('click', e => {
             const b = e.target.closest('.v-item'); if (!b) return;
@@ -228,6 +246,7 @@
         thumbUrls.forEach(u => URL.revokeObjectURL(u)); thumbUrls = [];
         items = [];
         const g = document.getElementById('vGrid'); if (g) g.innerHTML = '';
+        const cp = document.getElementById('vCloud'); if (cp) cp.classList.remove('open');
         const v = document.getElementById('vault');
         if (v) { v.classList.remove('unlocked'); if (v.classList.contains('open')) close(); }
     }
@@ -263,6 +282,7 @@
                 document.getElementById('vault').classList.add('unlocked');
                 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
                 refresh();
+                if (Cloud.pendingOpen) { Cloud.pendingOpen = false; Cloud.show(); }
             } else startPin('change-new');
         } else if (pinPurpose === 'change-new') {
             pinNewTemp = entered; startPin('change-confirm');
@@ -449,11 +469,12 @@
         const img = document.createElement('img'); img.src = u; img.alt = ''; tile.prepend(img);
     }
 
-    async function importFiles(files) {
+    async function importFiles(files, opts = {}) {
         files = files.filter(f => kindOf(f));
-        if (!files.length) return;
+        if (!files.length) return 0;
         await openDB();
-        const folder = currentFolder === ALL ? UNFILED : currentFolder;
+        const folder = opts.folder || (currentFolder === ALL ? UNFILED : currentFolder);
+        if (opts.folder) { const ft = tx('folders', 'readwrite'); ft.objectStore('folders').put({ name: folder }); await doneP(ft); }
         const prog = document.getElementById('vProgress');
         prog.classList.add('on');
         let ok = 0;
@@ -467,6 +488,7 @@
                 const kind = kindOf(f);
                 const mime = f.type || (kind === 'video' ? (/\.mov$/i.test(f.name) ? 'video/quicktime' : 'video/mp4') : 'image/jpeg');
                 const meta = { name: f.name, type: kind, mime, size: f.size, folder, added: Date.now() + i, duration: duration || 0, thumb, thumbFailed: !thumb };
+                if (opts.extra) Object.assign(meta, opts.extra(f, i));
                 const idReq = t.objectStore('items').add(meta);
                 idReq.onsuccess = () => t.objectStore('blobs').put(f, idReq.result);
                 await doneP(t);
@@ -478,8 +500,9 @@
             lastActive = Date.now();
         }
         prog.classList.remove('on');
-        toast(`已匯入 ${ok} 個檔案到「${folder}」`);
+        if (!opts.silent) toast(`已匯入 ${ok} 個檔案到「${folder}」`);
         refresh();
+        return ok;
     }
 
     // ---------- 播放到影片牆 ----------
@@ -602,6 +625,263 @@
     }
 
     function toast(t) { if (typeof showToast === 'function') showToast(t); }
+
+
+    // ======================================================================
+    // 雲端硬碟：用自己的 Google 帳號登入，讀取指定資料夾的影片並下載到 App
+    // （只讀取，不會修改或刪除雲端上的檔案）
+    // ======================================================================
+    const Cloud = (() => {
+        const CID_KEY = 'driveClientId', TOKEN_KEY = 'driveToken', FOLDER_KEY = 'driveFolder';
+        const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+        const API = 'https://www.googleapis.com/drive/v3';
+        const ls = {
+            get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+            set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} },
+        };
+        const state = { pendingOpen: false, files: [], picked: new Set(), path: [], busy: false };
+
+        const clientId = () => (ls.get(CID_KEY) || '').trim();
+        function token() {
+            try { const t = JSON.parse(ls.get(TOKEN_KEY) || 'null'); if (t && t.exp > Date.now() + 60000) return t.v; } catch (e) {}
+            return null;
+        }
+        const folder = () => { try { return JSON.parse(ls.get(FOLDER_KEY) || 'null'); } catch (e) { return null; } };
+        const redirectUri = () => location.origin + location.pathname.replace(/index\.html$/, '');
+
+        // 從 Google 登入回來時，網址後面會帶著通行碼，存起來並清掉網址
+        function captureRedirect() {
+            if (!location.hash || location.hash.indexOf('access_token=') < 0) return;
+            const q = new URLSearchParams(location.hash.slice(1));
+            const tk = q.get('access_token'), exp = parseInt(q.get('expires_in') || '3600', 10);
+            const st = q.get('state') || '';
+            if (tk && st === ls.get('driveState')) {
+                ls.set(TOKEN_KEY, JSON.stringify({ v: tk, exp: Date.now() + exp * 1000 }));
+                state.pendingOpen = true;
+            }
+            ls.set('driveState', null);
+            history.replaceState(null, '', location.pathname + location.search);
+            if (state.pendingOpen) setTimeout(() => { toast('已登入 Google，輸入密碼後會打開雲端資料夾'); open(); }, 600);
+        }
+        function login() {
+            const st = Math.random().toString(36).slice(2) + Date.now().toString(36);
+            ls.set('driveState', st);
+            const u = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+                client_id: clientId(), redirect_uri: redirectUri(), response_type: 'token',
+                scope: SCOPE, include_granted_scopes: 'true', prompt: 'select_account', state: st,
+            });
+            location.href = u;
+        }
+        function logout() {
+            const t = token();
+            if (t) fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(t), { method: 'POST' }).catch(() => {});
+            ls.set(TOKEN_KEY, null); render();
+        }
+
+        async function api(path, params) {
+            const t = token(); if (!t) { render(); throw new Error('login'); }
+            const r = await fetch(API + path + (params ? '?' + new URLSearchParams(params) : ''), { headers: { Authorization: 'Bearer ' + t } });
+            if (r.status === 401) { ls.set(TOKEN_KEY, null); render(); throw new Error('login'); }
+            if (!r.ok) throw new Error('Google 回應錯誤 ' + r.status);
+            return r.json();
+        }
+        async function listAll(q, fields) {
+            let out = [], pageToken;
+            do {
+                const p = { q, fields: 'nextPageToken,files(' + fields + ')', pageSize: 1000, orderBy: 'name_natural',
+                            supportsAllDrives: 'true', includeItemsFromAllDrives: 'true' };
+                if (pageToken) p.pageToken = pageToken;
+                const d = await api('/files', p);
+                out = out.concat(d.files || []); pageToken = d.nextPageToken;
+            } while (pageToken);
+            return out;
+        }
+
+        // ---------- 介面 ----------
+        function panel() {
+            let el2 = document.getElementById('vCloud');
+            if (!el2) {
+                el2 = el(`<div id="vCloud" class="v-cloud">
+                    <div class="v-top"><button type="button" class="v-btn" id="vCloudBack">‹ 返回</button><h2 id="vCloudTitle">雲端硬碟</h2></div>
+                    <div class="v-progress" id="vCloudProg"></div>
+                    <div class="v-cloud-body" id="vCloudBody"></div>
+                    <div class="v-bar" id="vCloudBar"></div>
+                </div>`);
+                document.getElementById('vault').appendChild(el2);
+                el2.querySelector('#vCloudBack').onclick = () => { if (state.busy) return; el2.classList.remove('open'); refresh(); };
+            }
+            return el2;
+        }
+        function show() { panel().classList.add('open'); render(); }
+        function setBar(html) { const b = document.getElementById('vCloudBar'); b.innerHTML = html; b.style.display = html ? '' : 'none'; return b; }
+        function setProg(t) { const p = document.getElementById('vCloudProg'); p.innerText = t || ''; p.classList.toggle('on', !!t); }
+        const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        function fmtSize(b) { b = +b || 0; return b > 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : (b / 1048576).toFixed(b > 104857600 ? 0 : 1) + ' MB'; }
+
+        function render() {
+            if (!document.getElementById('vCloud') || !panel().classList.contains('open')) return;
+            const body = document.getElementById('vCloudBody');
+            document.getElementById('vCloudTitle').innerText = '雲端硬碟';
+            if (!clientId()) return renderSetup(body);
+            if (!token()) {
+                body.innerHTML = `<div class="v-empty">要先登入你的 Google 帳號，<br>App 才能讀取雲端硬碟裡的影片。<br><span style="font-size:12px">只會讀取，不會修改或刪除雲端上的檔案。</span></div>`;
+                setBar(`<button type="button" class="v-btn primary" id="vGLogin">用 Google 登入</button>`).querySelector('#vGLogin').onclick = login;
+                return;
+            }
+            const f = folder();
+            if (!f) { state.path = [{ id: 'root', name: '我的雲端硬碟' }]; return browse(); }
+            renderFolder(f);
+        }
+
+        function renderSetup(body) {
+            body.innerHTML = `<div class="v-setup">
+                <p>第一次使用要貼上 Google 的「OAuth 用戶端 ID」（照設定步驟做完就會拿到，長得像 <code>123…apps.googleusercontent.com</code>）。</p>
+                <input id="vCidInput" placeholder="貼上用戶端 ID" autocapitalize="off" autocomplete="off" spellcheck="false">
+                <p class="v-hint">設定時「已授權的 JavaScript 來源」填：<br><code>${esc(location.origin)}</code><br>「已授權的重新導向 URI」填：<br><code>${esc(redirectUri())}</code></p>
+            </div>`;
+            setBar(`<button type="button" class="v-btn primary" id="vCidSave">儲存</button>`).querySelector('#vCidSave').onclick = () => {
+                const v = document.getElementById('vCidInput').value.trim();
+                if (!/\.apps\.googleusercontent\.com$/.test(v)) { toast('看起來不像用戶端 ID，結尾應該是 .apps.googleusercontent.com'); return; }
+                ls.set(CID_KEY, v); render();
+            };
+        }
+
+        // 選資料夾
+        async function browse() {
+            const body = document.getElementById('vCloudBody');
+            const cur = state.path[state.path.length - 1];
+            document.getElementById('vCloudTitle').innerText = '選擇資料夾';
+            body.innerHTML = `<div class="v-crumb">${state.path.map((p, i) => `<button type="button" data-i="${i}">${esc(p.name)}</button>`).join(' › ')}</div><div class="v-list" id="vFolderList"><div class="v-empty">讀取中…</div></div>`;
+            body.querySelectorAll('.v-crumb button').forEach(b => b.onclick = () => { state.path = state.path.slice(0, +b.dataset.i + 1); browse(); });
+            setBar(cur.id === 'root' ? '' : `<button type="button" class="v-btn primary" id="vUseFolder">使用「${esc(cur.name)}」</button>`);
+            const use = document.getElementById('vUseFolder');
+            if (use) use.onclick = () => { ls.set(FOLDER_KEY, JSON.stringify({ id: cur.id, name: cur.name })); state.files = []; state.picked.clear(); render(); };
+            try {
+                const subs = await listAll(`'${cur.id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`, 'id,name');
+                const list = document.getElementById('vFolderList'); if (!list) return;
+                list.innerHTML = subs.length ? '' : `<div class="v-empty">這裡沒有子資料夾${cur.id === 'root' ? '' : '，可以直接按下方「使用」'}</div>`;
+                subs.forEach(sf => {
+                    const b = el(`<button type="button" class="v-btn v-row">📁 <span></span></button>`);
+                    b.querySelector('span').textContent = sf.name;
+                    b.onclick = () => { state.path.push({ id: sf.id, name: sf.name }); browse(); };
+                    list.appendChild(b);
+                });
+            } catch (e) { if (e.message !== 'login') body.querySelector('#vFolderList').innerHTML = `<div class="v-empty">讀取失敗：${esc(e.message)}</div>`; }
+        }
+
+        async function downloadedIds() {
+            await openDB();
+            const all = await reqP(tx('items').objectStore('items').getAll());
+            return new Set(all.filter(i => i.driveId).map(i => i.driveId));
+        }
+
+        async function renderFolder(f) {
+            const body = document.getElementById('vCloudBody');
+            document.getElementById('vCloudTitle').innerText = '☁ ' + f.name;
+            body.innerHTML = `<div class="v-empty">讀取中…</div>`;
+            setBar('');
+            try {
+                state.files = await listAll(`'${f.id}' in parents and trashed=false and (mimeType contains 'video/' or mimeType contains 'image/')`,
+                    'id,name,mimeType,size,thumbnailLink,videoMediaMetadata(durationMillis)');
+            } catch (e) {
+                if (e.message !== 'login') body.innerHTML = `<div class="v-empty">讀取失敗：${esc(e.message)}</div>`;
+                return;
+            }
+            const have = await downloadedIds();
+            const fresh = state.files.filter(x => !have.has(x.id));
+            state.picked.forEach(id => { if (!state.files.some(x => x.id === id)) state.picked.delete(id); });
+            body.innerHTML = `<p class="v-hint" style="padding:0 14px">共 ${state.files.length} 個檔案，${fresh.length} 個還沒下載。點選要下載的檔案。</p><div class="v-grid" id="vCloudGrid"></div>`;
+            const grid = document.getElementById('vCloudGrid');
+            if (!state.files.length) grid.innerHTML = `<div class="v-empty">這個資料夾裡沒有影片或照片</div>`;
+            state.files.forEach(x => {
+                const got = have.has(x.id);
+                const b = el(`<button type="button" class="v-item${state.picked.has(x.id) ? ' sel' : ''}${got ? ' got' : ''}" data-id="${esc(x.id)}">
+                    <span class="v-ph">${(x.mimeType || '').startsWith('video/') ? '▶' : '🖼'}</span>
+                    <span class="v-check">✓</span><span class="v-name"></span><span class="v-dur"></span></button>`);
+                b.querySelector('.v-name').textContent = x.name;
+                const ms = x.videoMediaMetadata && x.videoMediaMetadata.durationMillis;
+                b.querySelector('.v-dur').textContent = got ? '已下載' : (ms ? fmtDur(ms / 1000) : fmtSize(x.size));
+                if (x.thumbnailLink) {
+                    const img = document.createElement('img'); img.alt = ''; img.referrerPolicy = 'no-referrer';
+                    img.onload = () => b.querySelector('.v-ph') && b.querySelector('.v-ph').remove();
+                    img.onerror = () => img.remove();
+                    img.src = x.thumbnailLink; b.prepend(img);
+                }
+                b.onclick = () => { if (got) return; state.picked.has(x.id) ? state.picked.delete(x.id) : state.picked.add(x.id); b.classList.toggle('sel'); updateBar(fresh); };
+                grid.appendChild(b);
+            });
+            grid.classList.add('v-select-grid');
+            updateBar(fresh);
+        }
+        function updateBar(fresh) {
+            const n = state.picked.size;
+            const bar = setBar(`<button type="button" class="v-btn" id="vCloudMore">⋯</button>
+                <button type="button" class="v-btn" id="vDlSel" ${n ? '' : 'disabled'}>下載所選${n ? ` (${n})` : ''}</button>
+                <button type="button" class="v-btn primary" id="vDlAll" ${fresh.length ? '' : 'disabled'}>同步${fresh.length ? `（${fresh.length} 個新檔）` : '：已是最新'}</button>`);
+            bar.querySelector('#vDlSel').onclick = () => download(state.files.filter(x => state.picked.has(x.id)));
+            bar.querySelector('#vDlAll').onclick = () => download(fresh);
+            bar.querySelector('#vCloudMore').onclick = cloudMore;
+        }
+        function cloudMore() {
+            const b = sheet(`<h3>雲端設定</h3>
+                <button type="button" class="v-btn" id="vCMChange">換資料夾</button>
+                <button type="button" class="v-btn" id="vCMLogout">登出 Google</button>
+                <button type="button" class="v-btn" id="vCMCid">更改用戶端 ID</button>
+                <button type="button" class="v-btn" id="vCMClose">關閉</button>`);
+            b.querySelector('#vCMClose').onclick = closeSheet;
+            b.querySelector('#vCMChange').onclick = () => { closeSheet(); ls.set(FOLDER_KEY, null); render(); };
+            b.querySelector('#vCMLogout').onclick = () => { closeSheet(); logout(); };
+            b.querySelector('#vCMCid').onclick = () => { closeSheet(); ls.set(CID_KEY, null); ls.set(TOKEN_KEY, null); render(); };
+        }
+
+        async function fetchFile(x, onProgress) {
+            const r = await fetch(`${API}/files/${encodeURIComponent(x.id)}?alt=media&supportsAllDrives=true`, { headers: { Authorization: 'Bearer ' + token() } });
+            if (r.status === 401) { ls.set(TOKEN_KEY, null); throw new Error('login'); }
+            if (!r.ok) throw new Error('下載失敗 ' + r.status);
+            const total = +x.size || +r.headers.get('content-length') || 0;
+            if (!r.body || !r.body.getReader) return r.blob();
+            const reader = r.body.getReader(); const parts = []; let got = 0;
+            for (;;) {
+                const { done, value } = await reader.read(); if (done) break;
+                parts.push(value); got += value.length; onProgress(got, total);
+            }
+            return new Blob(parts, { type: x.mimeType });
+        }
+
+        async function download(list) {
+            if (!list.length || state.busy) return;
+            if (!token()) { render(); return; }
+            const f = folder();
+            state.busy = true; let ok = 0;
+            setBar('<button type="button" class="v-btn" disabled>下載中，請不要關閉 App…</button>');
+            try {
+                for (let i = 0; i < list.length; i++) {
+                    const x = list[i];
+                    const head = `下載 ${i + 1} / ${list.length}：${x.name}`;
+                    setProg(head);
+                    let blob;
+                    try {
+                        blob = await fetchFile(x, (g, t) => { lastActive = Date.now(); setProg(`${head}　${t ? Math.floor(g / t * 100) + '%' : fmtSize(g)}`); });
+                    } catch (e) {
+                        if (e.message === 'login') { toast('Google 登入已過期，請重新登入'); break; }
+                        toast(`「${x.name}」下載失敗`); continue;
+                    }
+                    setProg(`${head}　存入 App 中…`);
+                    const file = new File([blob], x.name, { type: x.mimeType || blob.type });
+                    ok += await importFiles([file], { folder: f.name, silent: true, extra: () => ({ driveId: x.id }) });
+                    lastActive = Date.now();
+                }
+            } finally {
+                state.busy = false; setProg('');
+                state.picked.clear();
+                toast(`已下載 ${ok} 個檔案到 App 的「${f.name}」資料夾`);
+                render();
+            }
+        }
+
+        return { show, render, captureRedirect, get pendingOpen() { return state.pendingOpen; }, set pendingOpen(v) { state.pendingOpen = v; } };
+    })();
+    Cloud.captureRedirect();
 
     window.Vault = { open, close, lock, isOpen };
 })();
